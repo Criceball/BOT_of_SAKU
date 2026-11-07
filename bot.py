@@ -41,7 +41,11 @@ FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
-HISTORY_LIMIT = 10
+HISTORY_LIMIT = 3
+# 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
+HISTORY_CHAR_LIMIT = 300
+# 返答の最大トークン数（長すぎる返答で上限を使い切らないため）
+MAX_REPLY_TOKENS = 800
 # Discordの1メッセージあたりの文字数上限
 DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
@@ -94,6 +98,7 @@ async def generate_reply(messages: list[dict]) -> str:
         groq_client.chat.completions.create,
         messages=messages,
         model=GROQ_MODEL,
+        max_completion_tokens=MAX_REPLY_TOKENS,
     )
     return completion.choices[0].message.content
 
@@ -228,11 +233,15 @@ async def handle_mention(message: discord.Message) -> None:
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
             refund_quota(quota_key)
-            await message.reply(f"⚠️ エラーが発生しました: `{e}`")
+            if "429" in str(e):
+                # 無料枠の上限（1分・1日）に当たった場合は、分かりやすく案内する
+                await message.reply("⚠️ 今は混み合っています。少し待ってから、もう一度話しかけてください。")
+            else:
+                await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
     reply_text = sanitize_reply(reply_text)
-    history.append({"role": "assistant", "content": reply_text})
+    history.append({"role": "assistant", "content": reply_text[:HISTORY_CHAR_LIMIT]})
     # AIの返答で @everyone などが鳴らないように、メンションを無効にする
     await message.reply(
         reply_text[:DISCORD_MESSAGE_LIMIT],

@@ -40,7 +40,7 @@ SECURITY_RULES = """\
 """
 
 # 会話1回あたりの入力文字数の上限（長すぎる入力は拒否して、無駄なAPI呼び出しを防ぐ）
-MAX_CHAT_CHARS = 500
+MAX_CHAT_CHARS = 200
 
 FALLBACK_REPLY = "ごめんなさい、その内容にはお答えできません。別のことでお話ししましょうか？"
 
