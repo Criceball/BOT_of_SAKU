@@ -1,4 +1,5 @@
 import asyncio
+import io
 import os
 import re
 import uuid
@@ -9,6 +10,15 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from groq import Groq
 from fishaudio import FishAudio
+
+from converter import (
+    FORMAT_ALIASES,
+    MAX_PDF_PAGES,
+    UnsupportedConversion,
+    convert_file,
+    detect_target,
+    normalize,
+)
 
 # 環境変数の読み込み
 load_dotenv()
@@ -24,6 +34,9 @@ SYSTEM_PROMPT = "あなたは親切な音声アシスタントです。自然な
 HISTORY_LIMIT = 10
 # Discordの1メッセージあたりの文字数上限
 DISCORD_MESSAGE_LIMIT = 2000
+# Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
+MAX_FILE_BYTES = 25 * 1024 * 1024
+MAX_UPLOAD_FILES = 10
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -91,9 +104,62 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
+def get_attachments(message: discord.Message) -> list[discord.Attachment]:
+    # 自分の添付がなければ、返信先のメッセージの添付を使う
+    if message.attachments:
+        return list(message.attachments)
+    ref = message.reference.resolved if message.reference else None
+    if isinstance(ref, discord.Message):
+        return list(ref.attachments)
+    return []
+
+
+async def handle_conversion(message: discord.Message, attachment: discord.Attachment, text: str) -> None:
+    src = normalize(os.path.splitext(attachment.filename)[1])
+    if not src:
+        await message.reply("❌ このファイル形式は変換に対応していません。")
+        return
+
+    dst = detect_target(text, src)
+    if dst is None:
+        supported = ", ".join(sorted(FORMAT_ALIASES))
+        await message.reply(f"変換先の形式を指定してください（例: 「これをjpegにして」）。\n対応形式: {supported}")
+        return
+
+    if attachment.size > MAX_FILE_BYTES:
+        await message.reply("❌ ファイルが大きすぎます（25MBまで）。")
+        return
+
+    async with message.channel.typing():
+        try:
+            data = await attachment.read()
+            outputs = await asyncio.to_thread(convert_file, data, src, dst)
+        except UnsupportedConversion as e:
+            await message.reply(f"❌ {e}")
+            return
+        except Exception as e:
+            await message.reply(f"⚠️ 変換に失敗しました: `{e}`")
+            return
+
+    if any(len(b) > MAX_FILE_BYTES for _, b in outputs):
+        await message.reply("❌ 変換後のファイルが大きすぎて送信できません。")
+        return
+
+    files = [discord.File(io.BytesIO(b), filename=n) for n, b in outputs[:MAX_UPLOAD_FILES]]
+    note = "（先頭ページのみ）" if src == "pdf" and dst != "txt" and len(outputs) == MAX_PDF_PAGES else ""
+    await message.reply(f"✅ {src} → {dst} に変換しました。{note}", files=files)
+
+
 async def handle_mention(message: discord.Message) -> None:
     # メンション部分を取り除いて本文だけを取り出す
     text = MENTION_PATTERN.sub("", message.content).strip()
+
+    # 添付ファイルがあれば、会話ではなくファイル変換として扱う
+    attachments = get_attachments(message)
+    if attachments:
+        await handle_conversion(message, attachments[0], text)
+        return
+
     if not text:
         await message.reply("何かお話しかけてください。")
         return
