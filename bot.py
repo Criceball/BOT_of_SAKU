@@ -44,7 +44,8 @@ HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
 HISTORY_CHAR_LIMIT = 300
 # 返答の最大トークン数（長すぎる返答で上限を使い切らないため）
-MAX_REPLY_TOKENS = 800
+# （gpt-ossは返事の前に思考の部分も書くので、少し余裕を持たせる）
+MAX_REPLY_TOKENS = 2048
 # 1日に使うトークンの上限。Groqの無料枠（1日20万）より手前で止める
 DAILY_TOKEN_BUDGET = 180_000
 BUDGET_MESSAGE = "もうあなたとは話したくない"
