@@ -299,5 +299,23 @@ async def talk(ctx, *, prompt: str):
             await ctx.send(f"⚠️ エラーが発生しました: `{e}`")
 
 
+async def start_health_server() -> None:
+    # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
+    # PORT が設定されているときだけ、ヘルスチェック用の小さなサーバーを立てる。
+    port = os.getenv("PORT")
+    if not port:
+        return
+
+    from aiohttp import web
+
+    app = web.Application()
+    app.router.add_get("/", lambda request: web.Response(text="ok"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", int(port)).start()
+
+
+bot.setup_hook = start_health_server
+
 # ボットの起動
 bot.run(DISCORD_TOKEN)

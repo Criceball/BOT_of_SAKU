@@ -31,3 +31,23 @@
 2. Discord Developer Portal で Message Content Intent を有効にします。
 3. 音声再生とファイル変換（音声・動画）には ffmpeg が必要です。
 4. Python 3.10 以上で、依存パッケージ（discord.py、python-dotenv、groq、Fish Audio SDK、Pillow、PyMuPDF）をインストールし、`python bot.py` で起動します。
+
+## Koyeb へのデプロイ
+
+Koyeb では Dockerfile でデプロイします。Web Service として作成してください（PORT で応答するヘルスチェック用サーバーを内蔵しています）。
+
+1. GitHub リポジトリを接続し、Builder で Dockerfile を選びます。
+2. 環境変数（Secret として設定）:
+   - `DISCORD_BOT_TOKEN`
+   - `GROQ_API_KEY`
+   - `FISH_API_KEY`
+   - `FISH_REFERENCE_ID`
+   - `PERSONA`（性格の設定。`persona.txt` の中身をそのまま貼る）
+   - 任意: `FISH_MODEL`
+3. ポートは 8080（Koyeb が `PORT` を渡すので、通常は変更不要）。
+4. デプロイ後、ログに「ログイン成功」と出れば起動できています。
+
+注意:
+- 無料枠は一定時間アクセスがないとスリープする場合があります。Discord の接続が切れることがあるので、料金プランと挙動を確認してください。
+- 音声（VC）の送信は UDP を使います。Koyeb 上で `!join` が動くかは、実際に試して確認してください。
+- `persona.txt` と `.env` はイメージに含めない設定です（`.dockerignore`）。
