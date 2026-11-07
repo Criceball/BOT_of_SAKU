@@ -55,7 +55,10 @@ QUOTA_MESSAGE = f"⚠️ 今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}�
 groq_client = Groq(api_key=GROQ_API_KEY)
 fish_client = FishAudio(api_key=FISH_API_KEY)
 
-intents = discord.Intents.all()
+# 必要なインテントだけを使う（Intents.all() は特権インテントを全部要求してしまうため）
+# メッセージ本文の読み取り（メンション会話）に Message Content Intent が必要
+intents = discord.Intents.default()
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # チャンネルごとの会話履歴（メンションでの会話用）
