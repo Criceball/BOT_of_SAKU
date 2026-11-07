@@ -28,6 +28,8 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 # Fish Audioで取得した音声モデルのID（.env に設定してください）
 FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
+# 音声生成のモデル。既定は無料枠の s2.1-pro-free（有料に切り替えるなら s2.1-pro）
+FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
 SYSTEM_PROMPT = "あなたは親切な音声アシスタントです。自然な日本語で、少し短めに答えてください。"
@@ -93,6 +95,7 @@ async def synthesize_speech(text: str) -> bytes:
         text=text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
+        model=FISH_MODEL,
     )
 
 

@@ -27,6 +27,7 @@
    - `GROQ_API_KEY`
    - `FISH_API_KEY`
    - `FISH_REFERENCE_ID`（Fish Audioの音声モデルID）
+   - `FISH_MODEL`（省略可。既定は無料枠の `s2.1-pro-free`。有料の `s2.1-pro` にもできます）
 2. Discord Developer Portal で Message Content Intent を有効にします。
 3. 音声再生とファイル変換（音声・動画）には ffmpeg が必要です。
 4. Python 3.10 以上で、依存パッケージ（discord.py、python-dotenv、groq、Fish Audio SDK、Pillow、PyMuPDF）をインストールし、`python bot.py` で起動します。
