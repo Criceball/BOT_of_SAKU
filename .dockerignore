@@ -1,0 +1,5 @@
+.git
+.env
+persona.txt
+__pycache__
+*.mp3

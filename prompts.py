@@ -1,5 +1,6 @@
 """AIの性格・口調の設定と、プロンプトインジェクション対策。Discordに依存しない。"""
 
+import os
 from pathlib import Path
 
 # ===== 性格・口調 =====
@@ -16,6 +17,10 @@ PERSONA_PATH = Path(__file__).with_name("persona.txt")
 
 
 def load_persona() -> str:
+    # Koyeb などでは環境変数 PERSONA に入れて渡せる（Secret として設定する）
+    env_persona = os.getenv("PERSONA", "").strip()
+    if env_persona:
+        return f"{env_persona}\n"
     try:
         text = PERSONA_PATH.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
