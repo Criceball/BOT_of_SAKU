@@ -49,8 +49,26 @@ FALLBACK_REPLY = "ごめんなさい、その内容にはお答えできませ�
 LENGTH_RULE = "返答は300文字程度で答えてください。"
 
 
+# Discordの !persona コマンドで変えた性格（再起動すると消えて、persona.txt / PERSONA の設定に戻る）
+_persona_override: str | None = None
+
+
+def set_persona(text: str) -> None:
+    global _persona_override
+    _persona_override = f"{text.strip()}\n"
+
+
+def reset_persona() -> None:
+    global _persona_override
+    _persona_override = None
+
+
+def current_persona() -> str:
+    return _persona_override or PERSONA
+
+
 def build_system_prompt() -> str:
-    return f"{PERSONA}\n{LENGTH_RULE}\n{SECURITY_RULES}"
+    return f"{current_persona()}\n{LENGTH_RULE}\n{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
