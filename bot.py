@@ -251,7 +251,7 @@ async def handle_mention(message: discord.Message) -> None:
     # 誰の発言か分かるように名前を付け、タグで囲んでデータとして渡す
     history.append({
         "role": "user",
-        "content": wrap_user_message(text, message.author.display_name),
+        "content": wrap_user_message(text, message.author.name),
     })
 
     async with message.channel.typing():
@@ -325,7 +325,7 @@ async def talk(ctx, *, prompt: str):
             # ① Groq APIでAIの返答テキストを生成
             raw_reply, used_tokens = await generate_reply([
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": wrap_user_message(prompt, ctx.author.display_name)},
+                {"role": "user", "content": wrap_user_message(prompt, ctx.author.name)},
             ])
             record_tokens(used_tokens)
             reply_text = sanitize_reply(raw_reply)
