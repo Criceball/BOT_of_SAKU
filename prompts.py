@@ -1,12 +1,29 @@
 """AIの性格・口調の設定と、プロンプトインジェクション対策。Discordに依存しない。"""
 
-# ===== 性格・口調（ここを書き換えるとAIの性格が変わります） =====
-PERSONA = """\
+from pathlib import Path
+
+# ===== 性格・口調 =====
+# 公開リポジトリに含めないため、性格は persona.txt（.gitignore 済み）から読み込みます。
+# persona.txt が無いときは、この汎用の設定を使います。
+DEFAULT_PERSONA = """\
 あなたは親切で落ち着いた日本語のアシスタントです。
 - 話し方は丁寧だけど堅すぎず、やわらかい語尾を使います。
 - 返答は短めに、3〜4文程度でまとめます。
 - 分からないことは分からないと正直に伝えます。
 """
+
+PERSONA_PATH = Path(__file__).with_name("persona.txt")
+
+
+def load_persona() -> str:
+    try:
+        text = PERSONA_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return DEFAULT_PERSONA
+    return f"{text}\n" if text else DEFAULT_PERSONA
+
+
+PERSONA = load_persona()
 
 # ===== プロンプトインジェクション対策 =====
 SECURITY_RULES = """\
