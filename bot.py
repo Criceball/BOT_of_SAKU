@@ -22,7 +22,10 @@ from converter import (
 from prompts import (
     MAX_CHAT_CHARS,
     build_system_prompt,
+    current_persona,
+    reset_persona,
     sanitize_reply,
+    set_persona,
     wrap_user_message,
 )
 
@@ -38,7 +41,6 @@ FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 # 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
@@ -253,7 +255,7 @@ async def handle_mention(message: discord.Message) -> None:
     async with message.channel.typing():
         try:
             reply_text, used_tokens = await generate_reply([
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": build_system_prompt()},
                 *history,
             ])
             record_tokens(used_tokens)
@@ -293,7 +295,7 @@ async def talk(ctx, *, prompt: str):
         try:
             # ① Groq APIでAIの返答テキストを生成
             raw_reply, used_tokens = await generate_reply([
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": build_system_prompt()},
                 {"role": "user", "content": wrap_user_message(prompt, ctx.author.name)},
             ])
             record_tokens(used_tokens)
@@ -311,6 +313,37 @@ async def talk(ctx, *, prompt: str):
         except Exception as e:
             refund_quota(quota_key)
             await ctx.send(f"⚠️ エラーが発生しました: `{e}`")
+
+
+PERSONA_MAX_CHARS = 1000
+
+
+# 性格の確認・変更・リセット（サーバーの管理者だけが使える）
+#   !persona            … 今の性格を表示
+#   !persona set <文章> … 性格を変える（再起動するまで有効）
+#   !persona reset      … 元の性格に戻す
+@bot.command(name="persona")
+async def persona(ctx, *, arg: str = ""):
+    if ctx.guild is None or not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ このコマンドはサーバーの管理者だけが使えます。")
+        return
+
+    action, _, value = arg.strip().partition(" ")
+    if action == "":
+        await ctx.send(f"現在の性格:\n```\n{current_persona()[:1500]}\n```")
+    elif action == "set":
+        if not value.strip():
+            await ctx.send("❌ `!persona set <性格の文章>` の形で入力してください。")
+        elif len(value) > PERSONA_MAX_CHARS:
+            await ctx.send(f"❌ 長すぎます（{PERSONA_MAX_CHARS}文字までです）。")
+        else:
+            set_persona(value)
+            await ctx.send("✅ 性格を変えました。再起動すると元に戻ります。")
+    elif action == "reset":
+        reset_persona()
+        await ctx.send("✅ 元の性格に戻しました。")
+    else:
+        await ctx.send("❌ 使い方: `!persona` / `!persona set <文章>` / `!persona reset`")
 
 
 async def start_health_server() -> None:
