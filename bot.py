@@ -37,7 +37,8 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 # 音声生成のモデル。既定は無料枠の s2.1-pro-free（有料に切り替えるなら s2.1-pro）
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 10
