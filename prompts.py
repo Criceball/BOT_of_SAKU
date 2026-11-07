@@ -45,8 +45,12 @@ MAX_CHAT_CHARS = 200
 FALLBACK_REPLY = "ごめんなさい、その内容にはお答えできません。別のことでお話ししましょうか？"
 
 
+# 返答の長さ（短くすると、Groqの上限の節約と読み上げの料金の節約になる）
+LENGTH_RULE = "返答は100文字以内で答えてください。"
+
+
 def build_system_prompt() -> str:
-    return f"{PERSONA}\n{SECURITY_RULES}"
+    return f"{PERSONA}\n{LENGTH_RULE}\n{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
