@@ -53,10 +53,12 @@ def wrap_user_message(text: str, speaker: str) -> str:
 
 def sanitize_reply(reply: str) -> str:
     """返答にシステムプロンプトの一部が含まれていたら、代わりの文に差し替える（設定の漏えい対策）。"""
+    # 行単位と文単位（「。」区切り）の両方で照合し、長い一行でも一部の漏えいを検出する
+    secret_text = build_system_prompt().replace("。", "。\n")
     secret_lines = [
-        line.strip()
-        for line in build_system_prompt().splitlines()
-        if len(line.strip()) >= 15
+        part.strip()
+        for part in secret_text.splitlines()
+        if len(part.strip()) >= 15
     ]
     if any(line in reply for line in secret_lines):
         return FALLBACK_REPLY
