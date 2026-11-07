@@ -2,7 +2,6 @@ import asyncio
 import io
 import os
 import re
-import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
@@ -140,19 +139,6 @@ async def synthesize_speech(text: str) -> bytes:
     )
 
 
-def play_audio_file(voice_client: discord.VoiceClient, path: str) -> None:
-    def cleanup(error: Exception | None) -> None:
-        # 再生が終わったら一時ファイルを削除する
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        if error:
-            print(f"⚠️ 再生エラー: {error}")
-
-    voice_client.play(discord.FFmpegPCMAudio(path), after=cleanup)
-
-
 @bot.event
 async def on_ready():
     print(f"✅ ログイン成功: {bot.user.name}")
@@ -280,37 +266,10 @@ async def handle_mention(message: discord.Message) -> None:
     )
 
 
-# 1. ボイスチャンネルに参加
-@bot.command(name="join")
-async def join(ctx):
-    if ctx.author.voice:
-        channel = ctx.author.voice.channel
-        if ctx.voice_client is not None:
-            await ctx.voice_client.move_to(channel)
-        else:
-            await channel.connect()
-        await ctx.send(f"🔊 `{channel.name}` に参加しました！")
-    else:
-        await ctx.send("❌ 先にボイスチャンネルに入っていてください。")
-
-
-# 2. ボイスチャンネルから退出
-@bot.command(name="leave")
-async def leave(ctx):
-    if ctx.voice_client:
-        await ctx.voice_client.disconnect()
-        await ctx.send("👋 ボイスチャンネルから退出しました。")
-    else:
-        await ctx.send("❌ ボットはボイスチャンネルにいません。")
-
-
-# 3. GroqとFish Audioを使った音声対話
+# GroqとFish Audioで返事を作り、音声ファイル（mp3）を文字チャンネルに添付して送る
+# （VCの再生は、Renderの音声通信が使えないため使わない）
 @bot.command(name="talk")
 async def talk(ctx, *, prompt: str):
-    if not ctx.voice_client:
-        await ctx.send("❌ 先に `!join` でボットを通話に入れてください。")
-        return
-
     if not budget_available():
         await ctx.send(BUDGET_MESSAGE)
         return
@@ -328,24 +287,16 @@ async def talk(ctx, *, prompt: str):
                 {"role": "user", "content": wrap_user_message(prompt, ctx.author.name)},
             ])
             record_tokens(used_tokens)
-            reply_text = sanitize_reply(raw_reply)
-            # 音声にする分を短くして、音声の料金を抑える
-            if len(reply_text) > TALK_CHAR_LIMIT:
-                reply_text = reply_text[:TALK_CHAR_LIMIT] + "…"
+            reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
 
-            # ② Fish Audio APIで音声を生成
-            audio_bytes = await synthesize_speech(reply_text)
-
-            # ③ ボイスチャンネルで再生（同時実行でも衝突しないように一意なファイル名を使う）
-            voice_client = ctx.voice_client
-            if not voice_client.is_playing():
-                path = f"response_{uuid.uuid4().hex}.mp3"
-                with open(path, "wb") as f:
-                    f.write(audio_bytes)
-                play_audio_file(voice_client, path)
-                await ctx.send(f"🤖 **AIの返答**: {reply_text}", allowed_mentions=discord.AllowedMentions.none())
-            else:
-                await ctx.send(f"🤖 (再生中): {reply_text}", allowed_mentions=discord.AllowedMentions.none())
+            # 音声にする分は短くして、音声の料金を抑える
+            audio_bytes = await synthesize_speech(reply_text[:TALK_CHAR_LIMIT])
+            audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
+            await ctx.send(
+                f"🤖 {reply_text}",
+                file=audio_file,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
 
         except Exception as e:
             refund_quota(quota_key)
