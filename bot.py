@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -19,6 +20,12 @@ from converter import (
     detect_target,
     normalize,
 )
+from prompts import (
+    MAX_CHAT_CHARS,
+    build_system_prompt,
+    sanitize_reply,
+    wrap_user_message,
+)
 
 # 環境変数の読み込み
 load_dotenv()
@@ -27,9 +34,11 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 FISH_API_KEY = os.getenv("FISH_API_KEY")
 # Fish Audioで取得した音声モデルのID（.env に設定してください）
 FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
+# 音声生成のモデル。既定は無料枠の s2.1-pro-free（有料に切り替えるなら s2.1-pro）
+FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-SYSTEM_PROMPT = "あなたは親切な音声アシスタントです。自然な日本語で、少し短めに答えてください。"
+SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 10
 # Discordの1メッセージあたりの文字数上限
@@ -37,6 +46,10 @@ DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_UPLOAD_FILES = 10
+# 1人1日の会話回数（メンションの会話と !talk の合計）。日付は日本時間で切り替える
+DAILY_LIMIT_PER_USER = 20
+JST = timezone(timedelta(hours=9))
+QUOTA_MESSAGE = f"⚠️ 今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -48,6 +61,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # チャンネルごとの会話履歴（メンションでの会話用）
 chat_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=HISTORY_LIMIT))
 MENTION_PATTERN = re.compile(r"<@!?\d+>")
+# 利用回数の記録（ユーザーID, 日付）→ 回数。再起動するとリセットされる
+daily_usage: dict[tuple[int, str], int] = defaultdict(int)
+
+
+def take_quota(user_id: int) -> tuple[int, str] | None:
+    """利用回数を1つ使う。上限に達していれば None を返す。"""
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    # 前日以前の記録は捨てる
+    for old_key in [k for k in daily_usage if k[1] != today]:
+        del daily_usage[old_key]
+    key = (user_id, today)
+    if daily_usage[key] >= DAILY_LIMIT_PER_USER:
+        return None
+    daily_usage[key] += 1
+    return key
+
+
+def refund_quota(key: tuple[int, str] | None) -> None:
+    # 失敗した場合は回数を戻す
+    if key is not None and daily_usage[key] > 0:
+        daily_usage[key] -= 1
 
 
 async def generate_reply(messages: list[dict]) -> str:
@@ -67,6 +101,7 @@ async def synthesize_speech(text: str) -> bytes:
         text=text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
+        model=FISH_MODEL,
     )
 
 
@@ -164,9 +199,21 @@ async def handle_mention(message: discord.Message) -> None:
         await message.reply("何かお話しかけてください。")
         return
 
+    if len(text) > MAX_CHAT_CHARS:
+        await message.reply(f"⚠️ 長すぎます（{MAX_CHAT_CHARS}文字までです）。")
+        return
+
+    quota_key = take_quota(message.author.id)
+    if quota_key is None:
+        await message.reply(QUOTA_MESSAGE)
+        return
+
     history = chat_history[message.channel.id]
-    # 複数人が話すチャンネルでも誰の発言か分かるように名前を付ける
-    history.append({"role": "user", "content": f"{message.author.display_name}: {text}"})
+    # 誰の発言か分かるように名前を付け、タグで囲んでデータとして渡す
+    history.append({
+        "role": "user",
+        "content": wrap_user_message(text, message.author.display_name),
+    })
 
     async with message.channel.typing():
         try:
@@ -176,11 +223,17 @@ async def handle_mention(message: discord.Message) -> None:
             ])
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
+            refund_quota(quota_key)
             await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
+    reply_text = sanitize_reply(reply_text)
     history.append({"role": "assistant", "content": reply_text})
-    await message.reply(reply_text[:DISCORD_MESSAGE_LIMIT])
+    # AIの返答で @everyone などが鳴らないように、メンションを無効にする
+    await message.reply(
+        reply_text[:DISCORD_MESSAGE_LIMIT],
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 # 1. ボイスチャンネルに参加
@@ -214,13 +267,18 @@ async def talk(ctx, *, prompt: str):
         await ctx.send("❌ 先に `!join` でボットを通話に入れてください。")
         return
 
+    quota_key = take_quota(ctx.author.id)
+    if quota_key is None:
+        await ctx.send(QUOTA_MESSAGE)
+        return
+
     async with ctx.typing():
         try:
             # ① Groq APIでAIの返答テキストを生成
-            reply_text = await generate_reply([
+            reply_text = sanitize_reply(await generate_reply([
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ])
+                {"role": "user", "content": wrap_user_message(prompt, ctx.author.display_name)},
+            ]))
 
             # ② Fish Audio APIで音声を生成
             audio_bytes = await synthesize_speech(reply_text)
@@ -232,11 +290,12 @@ async def talk(ctx, *, prompt: str):
                 with open(path, "wb") as f:
                     f.write(audio_bytes)
                 play_audio_file(voice_client, path)
-                await ctx.send(f"🤖 **AIの返答**: {reply_text}")
+                await ctx.send(f"🤖 **AIの返答**: {reply_text}", allowed_mentions=discord.AllowedMentions.none())
             else:
-                await ctx.send(f"🤖 (再生中): {reply_text}")
+                await ctx.send(f"🤖 (再生中): {reply_text}", allowed_mentions=discord.AllowedMentions.none())
 
         except Exception as e:
+            refund_quota(quota_key)
             await ctx.send(f"⚠️ エラーが発生しました: `{e}`")
 
 
