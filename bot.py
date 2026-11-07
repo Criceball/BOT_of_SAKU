@@ -50,7 +50,7 @@ MAX_REPLY_TOKENS = 2048
 DAILY_TOKEN_BUDGET = 180_000
 BUDGET_MESSAGE = "もうあなたとは話したくない"
 # 音声にする返答の文字数上限（Fish Audioの料金は文字数で決まるため）
-TALK_CHAR_LIMIT = 120
+TALK_CHAR_LIMIT = 300
 # Discordの1メッセージあたりの文字数上限
 DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
@@ -138,6 +138,15 @@ async def synthesize_speech(text: str) -> bytes:
         format="mp3",
         model=FISH_MODEL,
     )
+
+
+def cut_at_sentence(text: str, limit: int) -> str:
+    """limit文字以内に収める。できるだけ文の区切り（。！？）で切って、音声が途中で途切れないようにする。"""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = max(head.rfind("。"), head.rfind("！"), head.rfind("？"))
+    return head[: cut + 1] if cut > 0 else head
 
 
 @bot.event
@@ -291,7 +300,7 @@ async def talk(ctx, *, prompt: str):
             reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
 
             # 音声にする分は短くして、音声の料金を抑える
-            audio_bytes = await synthesize_speech(reply_text[:TALK_CHAR_LIMIT])
+            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
             audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
             await ctx.send(
                 f"🤖 {reply_text}",
