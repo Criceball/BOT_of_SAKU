@@ -37,10 +37,20 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 # 音声生成のモデル。既定は無料枠の s2.1-pro-free（有料に切り替えるなら s2.1-pro）
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+# 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
-HISTORY_LIMIT = 10
+HISTORY_LIMIT = 3
+# 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
+HISTORY_CHAR_LIMIT = 300
+# 返答の最大トークン数（長すぎる返答で上限を使い切らないため）
+MAX_REPLY_TOKENS = 800
+# 1日に使うトークンの上限。Groqの無料枠（1日20万）より手前で止める
+DAILY_TOKEN_BUDGET = 180_000
+BUDGET_MESSAGE = "もうあなたとは話したくない"
+# 音声にする返答の文字数上限（Fish Audioの料金は文字数で決まるため）
+TALK_CHAR_LIMIT = 120
 # Discordの1メッセージあたりの文字数上限
 DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
@@ -87,14 +97,36 @@ def refund_quota(key: tuple[int, str] | None) -> None:
         daily_usage[key] -= 1
 
 
-async def generate_reply(messages: list[dict]) -> str:
+# 日ごとの全体のトークン使用量（日付 → トークン数）。再起動するとリセットされる
+daily_tokens: dict[str, int] = defaultdict(int)
+
+
+def today_jst() -> str:
+    return datetime.now(JST).strftime("%Y-%m-%d")
+
+
+def budget_available() -> bool:
+    return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
+
+
+def record_tokens(used: int) -> None:
+    today = today_jst()
+    # 前日以前の記録は捨てる
+    for old_day in [d for d in daily_tokens if d != today]:
+        del daily_tokens[old_day]
+    daily_tokens[today] += used
+
+
+async def generate_reply(messages: list[dict]) -> tuple[str, int]:
     # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
     completion = await asyncio.to_thread(
         groq_client.chat.completions.create,
         messages=messages,
         model=GROQ_MODEL,
+        max_completion_tokens=MAX_REPLY_TOKENS,
     )
-    return completion.choices[0].message.content
+    used = completion.usage.total_tokens if completion.usage else 0
+    return completion.choices[0].message.content, used
 
 
 async def synthesize_speech(text: str) -> bytes:
@@ -206,6 +238,10 @@ async def handle_mention(message: discord.Message) -> None:
         await message.reply(f"⚠️ 長すぎます（{MAX_CHAT_CHARS}文字までです）。")
         return
 
+    if not budget_available():
+        await message.reply(BUDGET_MESSAGE)
+        return
+
     quota_key = take_quota(message.author.id)
     if quota_key is None:
         await message.reply(QUOTA_MESSAGE)
@@ -220,18 +256,23 @@ async def handle_mention(message: discord.Message) -> None:
 
     async with message.channel.typing():
         try:
-            reply_text = await generate_reply([
+            reply_text, used_tokens = await generate_reply([
                 {"role": "system", "content": SYSTEM_PROMPT},
                 *history,
             ])
+            record_tokens(used_tokens)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
             refund_quota(quota_key)
-            await message.reply(f"⚠️ エラーが発生しました: `{e}`")
+            if "429" in str(e):
+                # 無料枠の上限（1分・1日）に当たった場合は、分かりやすく案内する
+                await message.reply("⚠️ 今は混み合っています。少し待ってから、もう一度話しかけてください。")
+            else:
+                await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
     reply_text = sanitize_reply(reply_text)
-    history.append({"role": "assistant", "content": reply_text})
+    history.append({"role": "assistant", "content": reply_text[:HISTORY_CHAR_LIMIT]})
     # AIの返答で @everyone などが鳴らないように、メンションを無効にする
     await message.reply(
         reply_text[:DISCORD_MESSAGE_LIMIT],
@@ -270,6 +311,10 @@ async def talk(ctx, *, prompt: str):
         await ctx.send("❌ 先に `!join` でボットを通話に入れてください。")
         return
 
+    if not budget_available():
+        await ctx.send(BUDGET_MESSAGE)
+        return
+
     quota_key = take_quota(ctx.author.id)
     if quota_key is None:
         await ctx.send(QUOTA_MESSAGE)
@@ -278,10 +323,15 @@ async def talk(ctx, *, prompt: str):
     async with ctx.typing():
         try:
             # ① Groq APIでAIの返答テキストを生成
-            reply_text = sanitize_reply(await generate_reply([
+            raw_reply, used_tokens = await generate_reply([
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": wrap_user_message(prompt, ctx.author.display_name)},
-            ]))
+            ])
+            record_tokens(used_tokens)
+            reply_text = sanitize_reply(raw_reply)
+            # 音声にする分を短くして、音声の料金を抑える
+            if len(reply_text) > TALK_CHAR_LIMIT:
+                reply_text = reply_text[:TALK_CHAR_LIMIT] + "…"
 
             # ② Fish Audio APIで音声を生成
             audio_bytes = await synthesize_speech(reply_text)
