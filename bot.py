@@ -20,6 +20,12 @@ from converter import (
     detect_target,
     normalize,
 )
+from prompts import (
+    MAX_CHAT_CHARS,
+    build_system_prompt,
+    sanitize_reply,
+    wrap_user_message,
+)
 
 # 環境変数の読み込み
 load_dotenv()
@@ -32,7 +38,7 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
-SYSTEM_PROMPT = "あなたは親切な音声アシスタントです。自然な日本語で、少し短めに答えてください。"
+SYSTEM_PROMPT = build_system_prompt()
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 10
 # Discordの1メッセージあたりの文字数上限
@@ -193,14 +199,21 @@ async def handle_mention(message: discord.Message) -> None:
         await message.reply("何かお話しかけてください。")
         return
 
+    if len(text) > MAX_CHAT_CHARS:
+        await message.reply(f"⚠️ 長すぎます（{MAX_CHAT_CHARS}文字までです）。")
+        return
+
     quota_key = take_quota(message.author.id)
     if quota_key is None:
         await message.reply(QUOTA_MESSAGE)
         return
 
     history = chat_history[message.channel.id]
-    # 複数人が話すチャンネルでも誰の発言か分かるように名前を付ける
-    history.append({"role": "user", "content": f"{message.author.display_name}: {text}"})
+    # 誰の発言か分かるように名前を付け、タグで囲んでデータとして渡す
+    history.append({
+        "role": "user",
+        "content": wrap_user_message(text, message.author.display_name),
+    })
 
     async with message.channel.typing():
         try:
@@ -214,8 +227,13 @@ async def handle_mention(message: discord.Message) -> None:
             await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
+    reply_text = sanitize_reply(reply_text)
     history.append({"role": "assistant", "content": reply_text})
-    await message.reply(reply_text[:DISCORD_MESSAGE_LIMIT])
+    # AIの返答で @everyone などが鳴らないように、メンションを無効にする
+    await message.reply(
+        reply_text[:DISCORD_MESSAGE_LIMIT],
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
 
 
 # 1. ボイスチャンネルに参加
@@ -257,10 +275,10 @@ async def talk(ctx, *, prompt: str):
     async with ctx.typing():
         try:
             # ① Groq APIでAIの返答テキストを生成
-            reply_text = await generate_reply([
+            reply_text = sanitize_reply(await generate_reply([
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ])
+                {"role": "user", "content": wrap_user_message(prompt, ctx.author.display_name)},
+            ]))
 
             # ② Fish Audio APIで音声を生成
             audio_bytes = await synthesize_speech(reply_text)
@@ -272,9 +290,9 @@ async def talk(ctx, *, prompt: str):
                 with open(path, "wb") as f:
                     f.write(audio_bytes)
                 play_audio_file(voice_client, path)
-                await ctx.send(f"🤖 **AIの返答**: {reply_text}")
+                await ctx.send(f"🤖 **AIの返答**: {reply_text}", allowed_mentions=discord.AllowedMentions.none())
             else:
-                await ctx.send(f"🤖 (再生中): {reply_text}")
+                await ctx.send(f"🤖 (再生中): {reply_text}", allowed_mentions=discord.AllowedMentions.none())
 
         except Exception as e:
             refund_quota(quota_key)
