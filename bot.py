@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 from collections import defaultdict, deque
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -37,6 +38,10 @@ DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_UPLOAD_FILES = 10
+# 1人1日の会話回数（メンションの会話と !talk の合計）。日付は日本時間で切り替える
+DAILY_LIMIT_PER_USER = 20
+JST = timezone(timedelta(hours=9))
+QUOTA_MESSAGE = f"⚠️ 今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -48,6 +53,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # チャンネルごとの会話履歴（メンションでの会話用）
 chat_history: dict[int, deque] = defaultdict(lambda: deque(maxlen=HISTORY_LIMIT))
 MENTION_PATTERN = re.compile(r"<@!?\d+>")
+# 利用回数の記録（ユーザーID, 日付）→ 回数。再起動するとリセットされる
+daily_usage: dict[tuple[int, str], int] = defaultdict(int)
+
+
+def take_quota(user_id: int) -> tuple[int, str] | None:
+    """利用回数を1つ使う。上限に達していれば None を返す。"""
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    # 前日以前の記録は捨てる
+    for old_key in [k for k in daily_usage if k[1] != today]:
+        del daily_usage[old_key]
+    key = (user_id, today)
+    if daily_usage[key] >= DAILY_LIMIT_PER_USER:
+        return None
+    daily_usage[key] += 1
+    return key
+
+
+def refund_quota(key: tuple[int, str] | None) -> None:
+    # 失敗した場合は回数を戻す
+    if key is not None and daily_usage[key] > 0:
+        daily_usage[key] -= 1
 
 
 async def generate_reply(messages: list[dict]) -> str:
@@ -164,6 +190,11 @@ async def handle_mention(message: discord.Message) -> None:
         await message.reply("何かお話しかけてください。")
         return
 
+    quota_key = take_quota(message.author.id)
+    if quota_key is None:
+        await message.reply(QUOTA_MESSAGE)
+        return
+
     history = chat_history[message.channel.id]
     # 複数人が話すチャンネルでも誰の発言か分かるように名前を付ける
     history.append({"role": "user", "content": f"{message.author.display_name}: {text}"})
@@ -176,6 +207,7 @@ async def handle_mention(message: discord.Message) -> None:
             ])
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
+            refund_quota(quota_key)
             await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
@@ -214,6 +246,11 @@ async def talk(ctx, *, prompt: str):
         await ctx.send("❌ 先に `!join` でボットを通話に入れてください。")
         return
 
+    quota_key = take_quota(ctx.author.id)
+    if quota_key is None:
+        await ctx.send(QUOTA_MESSAGE)
+        return
+
     async with ctx.typing():
         try:
             # ① Groq APIでAIの返答テキストを生成
@@ -237,6 +274,7 @@ async def talk(ctx, *, prompt: str):
                 await ctx.send(f"🤖 (再生中): {reply_text}")
 
         except Exception as e:
+            refund_quota(quota_key)
             await ctx.send(f"⚠️ エラーが発生しました: `{e}`")
 
 
