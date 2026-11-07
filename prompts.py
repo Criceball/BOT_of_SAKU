@@ -46,7 +46,7 @@ FALLBACK_REPLY = "ごめんなさい、その内容にはお答えできませ�
 
 
 # 返答の長さ（短くすると、Groqの上限の節約と読み上げの料金の節約になる）
-LENGTH_RULE = "返答は100文字以内で答えてください。"
+LENGTH_RULE = "返答は300文字程度で答えてください。"
 
 
 def build_system_prompt() -> str:
