@@ -31,6 +31,7 @@ from prompts import (  # noqa: E402
     strip_emotions,
     tts_prefix,
     tts_speed,
+    web_persona,
     wrap_user_message,
 )
 
@@ -42,9 +43,7 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 # Render などでは PORT が渡される。自分のPCで試すときは WEB_PORT（既定 8000）
 PORT = int(os.getenv("PORT") or os.getenv("WEB_PORT", "8000"))
 # 誰でも使えないように、画面とAPIにアクセスキーを必須にする
-ACCESS_KEY = os.getenv("WEB_ACCESS_KEY", "")
-if not ACCESS_KEY:
-    raise SystemExit("WEB_ACCESS_KEY を設定してください（画面にアクセスするための合言葉です）")
+ACCESS_KEY = os.getenv("WEB_ACCESS_KEY", "")  # 空のときは、画面を無効にする（main.py が判断する）
 
 MAX_REPLY_TOKENS = 2048
 HISTORY_LIMIT = 6  # 直近の発言を何件まで覚えるか
@@ -101,6 +100,11 @@ async def require_access_key(request: web.Request, handler):
     return await handler(request)
 
 
+async def healthz(request: web.Request) -> web.Response:
+    # Render のヘルスチェック用（鍵も不要で、軽く応答する）
+    return web.json_response({"ok": True})
+
+
 async def index(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(ROOT / "index.html")
 
@@ -125,7 +129,7 @@ async def chat(request: web.Request) -> web.Response:
     crazy = is_crazy(text)
     history.append({"role": "user", "content": wrap_user_message(text, "相手")})
     del history[:-HISTORY_LIMIT]
-    messages = [{"role": "system", "content": build_system_prompt()}, *history]
+    messages = [{"role": "system", "content": build_system_prompt(web_persona())}, *history]
     try:
         completion = await asyncio.to_thread(
             groq_client.chat.completions.create,
@@ -139,7 +143,7 @@ async def chat(request: web.Request) -> web.Response:
 
     if completion.usage:
         add_usage(completion.usage.total_tokens)
-    raw = sanitize_reply(completion.choices[0].message.content or "")
+    raw = sanitize_reply(completion.choices[0].message.content or "", web_persona())
     reply = strip_emotions(raw)
     history.append({"role": "assistant", "content": reply[:300]})
     del history[:-HISTORY_LIMIT]
@@ -254,6 +258,7 @@ app.on_startup.append(start_diagnostics)
 app.on_startup.append(load_filler)
 app.on_cleanup.append(stop_diagnostics)
 app.router.add_get("/", index)
+app.router.add_get("/healthz", healthz)
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
 app.router.add_post("/api/tts", tts)
@@ -261,6 +266,8 @@ app.router.add_get("/api/filler", filler)
 app.router.add_post("/api/reset", reset)
 
 if __name__ == "__main__":
+    if not ACCESS_KEY:
+        raise SystemExit("WEB_ACCESS_KEY を設定してください（画面にアクセスするための合言葉です）")
     # Render などの外部サーバーでは 0.0.0.0 で待ち受ける。自分のPCで試すときは 127.0.0.1 にする
     host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
     # アクセスの記録（いつ、どのリクエストが来て、何秒で応答したか）をログに出す
