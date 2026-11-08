@@ -58,7 +58,7 @@ DISCORD_MESSAGE_LIMIT = 2000
 # Discordの添付ファイルの上限（ブーストなしのサーバー）と、1メッセージの添付数上限
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_UPLOAD_FILES = 10
-# 1人1日の会話回数（メンションの会話と !talk の合計）。日付は日本時間で切り替える
+# 1人1日の会話回数（メンションの会話と /talk の合計）。日付は日本時間で切り替える
 DAILY_LIMIT_PER_USER = 20
 JST = timezone(timedelta(hours=9))
 QUOTA_MESSAGE = f"⚠️ 今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
@@ -278,72 +278,97 @@ async def handle_mention(message: discord.Message) -> None:
     )
 
 
-# GroqとFish Audioで返事を作り、音声ファイル（mp3）を文字チャンネルに添付して送る
+# Groq と Fish Audio で返事を作り、音声ファイル（mp3）を添付して送る（/talk）
 # （VCの再生は、Renderの音声通信が使えないため使わない）
-@bot.command(name="talk")
-async def talk(ctx, *, prompt: str):
+TALK_INPUT_LIMIT = 300
+
+
+@bot.tree.command(name="talk", description="AIに話しかけます（返事と音声が届きます）")
+@discord.app_commands.describe(text="話しかける内容")
+async def talk_command(interaction: discord.Interaction, text: str):
+    if len(text) > TALK_INPUT_LIMIT:
+        await interaction.response.send_message(f"❌ {TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
+        return
     if not budget_available():
-        await ctx.send(BUDGET_MESSAGE)
+        await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
         return
-
-    quota_key = take_quota(ctx.author.id)
+    quota_key = take_quota(interaction.user.id)
     if quota_key is None:
-        await ctx.send(QUOTA_MESSAGE)
+        await interaction.response.send_message(QUOTA_MESSAGE, ephemeral=True)
         return
 
-    async with ctx.typing():
-        try:
-            # ① Groq APIでAIの返答テキストを生成
-            raw_reply, used_tokens = await generate_reply([
-                {"role": "system", "content": build_system_prompt()},
-                {"role": "user", "content": wrap_user_message(prompt, ctx.author.name)},
-            ])
-            record_tokens(used_tokens)
-            reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
+    await interaction.response.defer(thinking=True)
+    try:
+        # ① Groq APIでAIの返答テキストを生成
+        raw_reply, used_tokens = await generate_reply([
+            {"role": "system", "content": build_system_prompt()},
+            {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
+        ])
+        record_tokens(used_tokens)
+        reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
 
-            # 音声にする分は短くして、音声の料金を抑える
-            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
-            audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
-            await ctx.send(
-                f"🤖 {reply_text}",
-                file=audio_file,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
-
-        except Exception as e:
-            refund_quota(quota_key)
-            await ctx.send(f"⚠️ エラーが発生しました: `{e}`")
+        # 音声にする分は短くして、音声の料金を抑える
+        audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
+        audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
+        await interaction.followup.send(
+            reply_text,
+            file=audio_file,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except Exception as e:
+        refund_quota(quota_key)
+        await interaction.followup.send(f"⚠️ エラーが発生しました: `{e}`", ephemeral=True)
 
 
 PERSONA_MAX_CHARS = 1000
 
 
-# 性格の確認・変更・リセット（サーバーの管理者だけが使える）
-#   !persona            … 今の性格を表示
-#   !persona set <文章> … 性格を変える（再起動するまで有効）
-#   !persona reset      … 元の性格に戻す
-@bot.command(name="persona")
-async def persona(ctx, *, arg: str = ""):
-    if ctx.guild is None or not ctx.author.guild_permissions.administrator:
-        await ctx.send("❌ このコマンドはサーバーの管理者だけが使えます。")
+# 性格の確認・変更・リセット（サーバーの管理者だけが使える）。結果は本人にだけ見える。
+@bot.tree.command(name="persona", description="AIの性格を確認・変更・リセットします（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.describe(action="確認・変更・リセットのどれか", text="変更するときの性格の文章")
+@discord.app_commands.choices(action=[
+    discord.app_commands.Choice(name="確認", value="show"),
+    discord.app_commands.Choice(name="変更", value="set"),
+    discord.app_commands.Choice(name="リセット", value="reset"),
+])
+async def persona_command(
+    interaction: discord.Interaction,
+    action: discord.app_commands.Choice[str],
+    text: str = "",
+):
+    if interaction.guild is None or not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ このコマンドはサーバーの管理者だけが使えます。", ephemeral=True)
         return
 
-    action, _, value = arg.strip().partition(" ")
-    if action == "":
-        await ctx.send(f"現在の性格:\n```\n{current_persona()[:1500]}\n```")
-    elif action == "set":
-        if not value.strip():
-            await ctx.send("❌ `!persona set <性格の文章>` の形で入力してください。")
-        elif len(value) > PERSONA_MAX_CHARS:
-            await ctx.send(f"❌ 長すぎます（{PERSONA_MAX_CHARS}文字までです）。")
+    if action.value == "show":
+        msg = f"現在の性格:\n```\n{current_persona()[:1500]}\n```"
+    elif action.value == "set":
+        if not text.strip():
+            msg = "❌ 変更するには text に性格の文章を入れてください。"
+        elif len(text) > PERSONA_MAX_CHARS:
+            msg = f"❌ 長すぎます（{PERSONA_MAX_CHARS}文字までです）。"
         else:
-            set_persona(value)
-            await ctx.send("✅ 性格を変えました。再起動すると元に戻ります。")
-    elif action == "reset":
-        reset_persona()
-        await ctx.send("✅ 元の性格に戻しました。")
+            set_persona(text)
+            msg = "✅ 性格を変えました。再起動すると元に戻ります。"
     else:
-        await ctx.send("❌ 使い方: `!persona` / `!persona set <文章>` / `!persona reset`")
+        reset_persona()
+        msg = "✅ 元の性格に戻しました。"
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+# 今日の使用量を表示する（/usage）。結果は本人にだけ見える。
+@bot.tree.command(name="usage", description="今日のAIの使用量を表示します")
+async def usage_command(interaction: discord.Interaction):
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    total = daily_tokens.get(today_jst(), 0)
+    mine = daily_usage.get((interaction.user.id, today), 0)
+    msg = (
+        "📊 今日の使用量\n"
+        f"- 全体のトークン：{total:,} / {DAILY_TOKEN_BUDGET:,}\n"
+        f"- あなたの回数：{mine} / {DAILY_LIMIT_PER_USER}"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
 
 
 async def start_health_server() -> None:
@@ -362,7 +387,13 @@ async def start_health_server() -> None:
     await web.TCPSite(runner, "0.0.0.0", int(port)).start()
 
 
-bot.setup_hook = start_health_server
+async def setup_hook() -> None:
+    await start_health_server()
+    # スラッシュコマンドを Discord に登録する（反映まで数分〜1時間かかることがある）
+    await bot.tree.sync()
+
+
+bot.setup_hook = setup_hook
 
 # ボットの起動
 bot.run(DISCORD_TOKEN)
