@@ -101,7 +101,7 @@ async def require_access_key(request: web.Request, handler):
 
 
 async def healthz(request: web.Request) -> web.Response:
-    # Render のヘルスチェック用（鍵も不要で、軽く応答する）
+    # Render がこのサーバーの生存を確かめるための応答（応答しなければ、Render が再起動する）
     return web.json_response({"ok": True})
 
 
@@ -258,7 +258,7 @@ app.on_startup.append(start_diagnostics)
 app.on_startup.append(load_filler)
 app.on_cleanup.append(stop_diagnostics)
 app.router.add_get("/", index)
-app.router.add_get("/healthz", healthz)
+app.router.add_get("/healthz", healthz)   # Render のヘルスチェック用（軽くて、鍵もいらない）
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
 app.router.add_post("/api/tts", tts)

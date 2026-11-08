@@ -133,8 +133,8 @@ def tts_tags(crazy: bool) -> str:
 
 
 # 話す速さ（1.0が普通、2.0が最大）。狂気時は速くする
-TTS_SPEED_NORMAL = 1.0
-TTS_SPEED_CRAZY = 1.4
+TTS_SPEED_NORMAL = 1.2
+TTS_SPEED_CRAZY = 1.6
 
 
 def tts_speed(crazy: bool) -> float:
