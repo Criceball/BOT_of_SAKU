@@ -125,12 +125,17 @@
       <button id="moodAdd" class="secondary">動画を選んで追加</button>
     </div>
     <input id="moodFile" type="file" accept="video/*" hidden>
+    <div class="row">
+      <button id="pkgExport" class="secondary">パッケージを保存</button>
+      <label class="btn secondary">パッケージを読み込む<input id="pkgFile" type="file" accept=".zip" hidden></label>
+    </div>
     <ul id="moodList"></ul>
     <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
   </div>
   </div>
 </section>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <audio id="player"></audio>
 <audio id="filler"></audio>
 <script>
@@ -350,6 +355,85 @@
     renderMoods();
     saveState();
   });
+  // ---- パッケージ：言葉・動画・画像を、1つの zip にまとめて保存・読み込みする ----
+  function guessType(name) {
+    const ext = name.split('.').pop().toLowerCase();
+    return { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+             png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }[ext] || '';
+  }
+  $('pkgExport').onclick = async () => {
+    if (typeof JSZip === 'undefined') {
+      statusEl.textContent = "パッケージの機能を読み込めませんでした（通信を確かめてください）";
+      return;
+    }
+    const zip = new JSZip();
+    const manifest = { version: 1, talk: null, image: null, moods: [] };
+    if (talkEntry) {
+      zip.file('talk', talkEntry.blob);
+      manifest.talk = { name: talkEntry.name, file: 'talk' };
+    }
+    if (imageEntry) {
+      zip.file('image', imageEntry.blob);
+      manifest.image = { name: imageEntry.name, file: 'image' };
+    }
+    moods.forEach((m, i) => {
+      zip.file(`mood${i}`, m.blob);
+      manifest.moods.push({ kw: m.kw, name: m.name, file: `mood${i}` });
+    });
+    zip.file('manifest.json', JSON.stringify(manifest, null, 2));
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'web-talk-package.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    statusEl.textContent = `パッケージを保存しました（言葉 ${moods.length} 件）`;
+  };
+  $('pkgFile').addEventListener('change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';   // 同じファイルを続けて選べるように
+    if (!f) return;
+    if (typeof JSZip === 'undefined') {
+      statusEl.textContent = "パッケージの機能を読み込めませんでした（通信を確かめてください）";
+      return;
+    }
+    try {
+      const zip = await JSZip.loadAsync(f);
+      const manifest = JSON.parse(await zip.file('manifest.json').async('string'));
+      const load = async (entry, mime) => {
+        const file = zip.file(entry.file);
+        if (!file) throw new Error(`中身がありません: ${entry.file}`);
+        return new Blob([await file.async('arraybuffer')], { type: guessType(entry.name) });
+      };
+      // 読み込んだものに入れ替える（前の動画はメモリから消す）
+      moods.forEach(m => URL.revokeObjectURL(m.url));
+      moods = [];
+      if (manifest.talk) {
+        const blob = await load(manifest.talk);
+        if (talkUrl) URL.revokeObjectURL(talkUrl);
+        talkUrl = URL.createObjectURL(blob);
+        talkEntry = { blob, name: manifest.talk.name };
+        $('talkName').textContent = manifest.talk.name;
+      }
+      if (manifest.image) {
+        const blob = await load(manifest.image);
+        imageEntry = { blob, name: manifest.image.name };
+        pic.dataset.broken = '';
+        pic.src = URL.createObjectURL(blob);
+      }
+      for (const m of manifest.moods || []) {
+        const blob = await load(m);
+        moods.push({ kw: m.kw, name: m.name, blob, url: URL.createObjectURL(blob) });
+      }
+      renderMoods();
+      saveState();
+      showIdle();
+      statusEl.textContent = `パッケージを読み込みました（言葉 ${moods.length} 件）`;
+    } catch (err) {
+      statusEl.textContent = `パッケージを読み込めませんでした（ファイルが違うかもしれません）`;
+    }
+  });
+
   function renderMoods() {
     const list = $('moodList');
     list.textContent = '';
