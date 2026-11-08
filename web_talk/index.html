@@ -463,9 +463,10 @@
   }
 
   // 文ごとの音声を、同時に作り始める（待ち時間を重ねて短くするため）
+  let replyCrazy = false;   // 今の返事が狂気時の声か
   function fetchSentence(text, signal) {
     const job = { ready: false, url: null, promise: null };
-    job.promise = post('/api/tts', { text }, signal)
+    job.promise = post('/api/tts', { text, crazy: replyCrazy }, signal)
       .then(async r => (r.ok ? URL.createObjectURL(await r.blob()) : null))
       .catch(() => null)
       .then(url => { job.ready = true; job.url = url; return url; });
@@ -523,6 +524,7 @@
       const r = await post('/api/chat', { text }, signal);
       const j = await r.json();
       if (myGen !== gen) return;
+      replyCrazy = !!j.crazy;
       stopFiller();   // 返事が来たので「はい！」を止める
       if (!r.ok) {
         subtitle.textContent = j.error || "エラーが発生しました";

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-from prompts import MAX_CHAT_CHARS, build_system_prompt, sanitize_reply, wrap_user_message  # noqa: E402
+from prompts import MAX_CHAT_CHARS, build_system_prompt, is_crazy, sanitize_reply, tts_tags, wrap_user_message  # noqa: E402
 
 load_dotenv(REPO / ".env")
 
@@ -109,6 +109,7 @@ async def chat(request: web.Request) -> web.Response:
     if not budget_left():
         return json_error("もうあなたとは話したくない", 429)
 
+    crazy = is_crazy(text)
     history.append({"role": "user", "content": wrap_user_message(text, "相手")})
     del history[:-HISTORY_LIMIT]
     messages = [{"role": "system", "content": build_system_prompt()}, *history]
@@ -128,7 +129,7 @@ async def chat(request: web.Request) -> web.Response:
     reply = sanitize_reply(completion.choices[0].message.content or "")
     history.append({"role": "assistant", "content": reply[:300]})
     del history[:-HISTORY_LIMIT]
-    return web.json_response({"reply": reply})
+    return web.json_response({"reply": reply, "crazy": crazy})
 
 
 async def tts(request: web.Request) -> web.StreamResponse:
@@ -137,6 +138,8 @@ async def tts(request: web.Request) -> web.StreamResponse:
     text = cut_at_sentence(str(data.get("text", "")).strip(), TTS_CHAR_LIMIT)
     if not text:
         return json_error("読み上げる文字がありません", 400)
+    # 感情のタグ（角かっこ）を付けて、声の調子を変える
+    text = tts_tags(bool(data.get("crazy"))) + text
     try:
         stream = await fish_async.tts.stream(
             text=text,

@@ -23,9 +23,11 @@ from prompts import (
     MAX_CHAT_CHARS,
     build_system_prompt,
     current_persona,
+    is_crazy,
     reset_persona,
     sanitize_reply,
     set_persona,
+    tts_tags,
     wrap_user_message,
 )
 
@@ -131,11 +133,11 @@ async def generate_reply(messages: list[dict]) -> tuple[str, int]:
     return completion.choices[0].message.content, used
 
 
-async def synthesize_speech(text: str) -> bytes:
-    # 音声生成も同期APIのため、別スレッドで実行する
+async def synthesize_speech(text: str, crazy: bool = False) -> bytes:
+    # 音声生成も同期APIのため、別スレッドで実行する。感情のタグを付けて声の調子を変える
     return await asyncio.to_thread(
         fish_client.tts.convert,
-        text=text,
+        text=tts_tags(crazy) + text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
         model=FISH_MODEL,
@@ -308,7 +310,9 @@ async def talk_command(interaction: discord.Interaction, text: str):
         reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
 
         # 音声にする分は短くして、音声の料金を抑える
-        audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
+        audio_bytes = await synthesize_speech(
+            cut_at_sentence(reply_text, TALK_CHAR_LIMIT), crazy=is_crazy(text)
+        )
         audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
         await interaction.followup.send(
             reply_text,

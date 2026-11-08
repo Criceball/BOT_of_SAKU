@@ -90,3 +90,19 @@ def sanitize_reply(reply: str) -> str:
     if any(line in reply for line in secret_lines):
         return FALLBACK_REPLY
     return reply
+
+
+# ===== 音声の感情表現（Fish Audio のタグ。角かっこで書く） =====
+# 通常時と、狂気時のタグ。ここを変えると、音声の調子が変わります。
+TTS_TAGS_NORMAL = "[落ち着いた様子で]"
+TTS_TAGS_CRAZY = "[怒り狂う][早口で]"
+# この言葉がユーザーの発言に入ると、その返事は狂気時の声になります
+CRAZY_TRIGGERS = ["狂って"]
+
+
+def is_crazy(user_text: str) -> bool:
+    return any(word in user_text for word in CRAZY_TRIGGERS)
+
+
+def tts_tags(crazy: bool) -> str:
+    return TTS_TAGS_CRAZY if crazy else TTS_TAGS_NORMAL
