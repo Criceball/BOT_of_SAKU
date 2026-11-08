@@ -236,53 +236,36 @@
     });
   }
 
-  // 返事の音声を受け取る。届いた部分から再生できるように、MediaSource に少しずつ入れる。
-  // 再生は play() を呼ぶまで始めない（相づちが終わってから始めるため）。
-  async function prepareReply(text) {
-    const r = await post('/api/tts', { text });
-    const none = { play: async () => {}, ended: Promise.resolve() };
-    if (!r.ok) {
-      statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
-      return none;
-    }
-    const ended = new Promise(resolve => {
-      replyEl.onended = resolve;
-      replyEl.onerror = resolve;
-    });
+  // 返事を文ごとに区切る（。！？の後で切る）
+  function splitSentences(text) {
+    const parts = text.match(/[^。！？]+[。！？]?/g) || [text];
+    return parts.map(p => p.trim()).filter(Boolean);
+  }
 
-    if (!window.MediaSource || !MediaSource.isTypeSupported('audio/mpeg')) {
-      // 途中再生に対応していないブラウザでは、全部受け取ってから再生する
-      replyEl.src = URL.createObjectURL(await r.blob());
-      return { play: () => replyEl.play().catch(() => {}), ended };
-    }
+  // 文ごとの音声を、同時に作り始める（待ち時間を重ねて短くするため）
+  function fetchSentence(text) {
+    return post('/api/tts', { text })
+      .then(async r => (r.ok ? URL.createObjectURL(await r.blob()) : null))
+      .catch(() => null);
+  }
 
-    const ms = new MediaSource();
-    replyEl.src = URL.createObjectURL(ms);
-    await new Promise(resolve => ms.addEventListener('sourceopen', resolve, { once: true }));
-    const sb = ms.addSourceBuffer('audio/mpeg');
-    const idle = () => new Promise(resolve => {
-      if (!sb.updating) resolve();
-      else sb.addEventListener('updateend', resolve, { once: true });
-    });
-    const feed = (async () => {
-      try {
-        const reader = r.body.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          await idle();
-          sb.appendBuffer(value);
-        }
-        await idle();
-        if (ms.readyState === 'open') ms.endOfStream();
-      } catch (_) {
-        if (ms.readyState === 'open') ms.endOfStream();
+  // できた順に、一文ずつ再生する。最初の一文が届いたら、すぐ流す。
+  async function speakReply(text, fillerDone) {
+    const jobs = splitSentences(text).map(fetchSentence);
+    await fillerDone;
+    for (const job of jobs) {
+      const url = await job;
+      if (!url) {
+        statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
+        continue;
       }
-    })();
-    return {
-      play: () => replyEl.play().catch(() => {}),
-      ended: feed.then(() => ended),
-    };
+      await new Promise(resolve => {
+        replyEl.onended = resolve;
+        replyEl.onerror = resolve;
+        replyEl.src = url;
+        replyEl.play().catch(resolve);
+      });
+    }
   }
 
   async function ask(text) {
@@ -304,11 +287,7 @@
       }
       subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
-      const replyP = prepareReply(j.reply);   // 相づちの再生中に、返事の音声を受け取っておく
-      await fillerDone;
-      const reply = await replyP;
-      await reply.play();
-      await reply.ended;
+      await speakReply(j.reply, fillerDone);
     } catch (e) {
       subtitle.textContent = `通信エラー：${e}`;
     } finally {
