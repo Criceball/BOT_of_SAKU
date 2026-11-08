@@ -3,57 +3,108 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>櫻井と話す</title>
+<title>AIと話す</title>
 <style>
   :root { color-scheme: dark; }
+  [hidden] { display: none !important; }
   body {
     margin: 0; min-height: 100vh; background: #1b1f24; color: #eef2f5;
-    font-family: system-ui, "Yu Gothic", sans-serif;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 20px; padding: 16px; box-sizing: border-box;
+    font-family: system-ui, "Yu Gothic", sans-serif; box-sizing: border-box;
   }
-  #avatarWrap {
-    width: 240px; height: 240px; border-radius: 50%; background: #3a4450;
-    overflow: hidden; transition: transform 0.05s linear;
+
+  /* 参加画面（Zoomの参加画面のような、シンプルな配置） */
+  #join {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 16px; box-sizing: border-box;
   }
-  #avatar { width: 100%; height: 100%; object-fit: cover; display: block; }
+  #join .card { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
+  #join h1 { font-size: 1.4rem; text-align: center; margin: 0 0 12px; }
+  #join label { font-size: 0.95rem; opacity: 0.85; }
+  #join input {
+    padding: 12px; border-radius: 8px; border: 1px solid #556; background: #20262d;
+    color: #eef2f5; font-size: 1rem;
+  }
+  #join button {
+    padding: 12px; border-radius: 8px; border: 0; background: #4f8cff; color: #fff;
+    font-size: 1rem; cursor: pointer; margin-top: 8px;
+  }
+  #join button:disabled { background: #3a4450; color: #8a95a3; cursor: default; }
+  #joinMsg { min-height: 1.2em; font-size: 0.9rem; color: #f0a0a0; text-align: center; margin: 0; }
+
+  /* 画面（写真を表示する） */
+  #room {
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+    gap: 14px; padding: 16px; box-sizing: border-box;
+  }
+  #stage {
+    width: min(640px, 92vw); aspect-ratio: 4 / 3; background: #000; border-radius: 12px;
+    overflow: hidden; display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  #pic {
+    width: 100%; height: 100%; object-fit: contain; display: block;
+    transition: transform 0.05s linear;
+  }
+  #placeholder { position: absolute; opacity: 0.6; font-size: 1rem; }
+  #stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
+  #stage:fullscreen #pic { object-fit: contain; }
+
   #status { font-size: 0.9rem; opacity: 0.7; min-height: 1.2em; }
   #subtitle {
-    min-height: 4em; max-width: 640px; text-align: center; font-size: 1.2rem;
+    min-height: 3em; max-width: 640px; text-align: center; font-size: 1.1rem;
     line-height: 1.7; white-space: pre-wrap; word-break: break-word;
   }
-  .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; }
-  input[type=text], input[type=password] {
+  .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; justify-content: center; }
+  .row input[type=text] {
     flex: 1; min-width: 140px; padding: 10px; border-radius: 8px;
     border: 1px solid #556; background: #20262d; color: #eef2f5; font-size: 1rem;
   }
-  button {
+  button, .btn {
     padding: 10px 16px; border-radius: 8px; border: 0; background: #4f8cff;
-    color: #fff; font-size: 1rem; cursor: pointer;
+    color: #fff; font-size: 1rem; cursor: pointer; display: inline-block;
   }
   button:disabled { opacity: 0.5; cursor: default; }
-  button.secondary { background: #3a4450; }
+  .secondary { background: #3a4450; }
 </style>
 </head>
 <body>
-<div id="avatarWrap"><img id="avatar" alt="" src="/avatar.png" onerror="this.remove()"></div>
-<div id="status">準備中</div>
-<div id="subtitle"></div>
-<div class="row">
-  <input id="key" type="password" placeholder="アクセスキー（合言葉）" autocomplete="off">
-  <button id="start">話し始める</button>
-</div>
-<div class="row">
-  <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
-  <button id="send" class="secondary">送る</button>
-  <button id="reset" class="secondary">リセット</button>
-</div>
+
+<section id="join">
+  <div class="card">
+    <h1>AIと話す</h1>
+    <label for="key">アクセスキー</label>
+    <input id="key" type="password" autocomplete="off" placeholder="アクセスキーを入力">
+    <button id="join-btn" disabled>参加</button>
+    <p id="joinMsg"></p>
+  </div>
+</section>
+
+<section id="room" hidden>
+  <div id="stage">
+    <img id="pic" alt="" src="/avatar.png" onerror="this.style.display='none'">
+    <div id="placeholder">画像を選んでください</div>
+  </div>
+  <div id="status"></div>
+  <div id="subtitle"></div>
+  <div class="row">
+    <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
+    <button id="fullscreen" class="secondary">全画面</button>
+    <button id="talk">話し始める</button>
+    <button id="reset" class="secondary">リセット</button>
+  </div>
+  <div class="row">
+    <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
+    <button id="send" class="secondary">送る</button>
+  </div>
+</section>
+
 <audio id="player"></audio>
 <audio id="filler"></audio>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const wrap = $('avatarWrap');
+  const pic = $('pic');
+  const stage = $('stage');
   const subtitle = $('subtitle');
   const statusEl = $('status');
   const replyEl = $('player');
@@ -62,12 +113,48 @@
 
   let recognition = null;
   let listening = false;  // 話しかけを受け付けている
-  let speaking = false;   // 櫻井が返事をしている間は true（音声認識を止める）
+  let speaking = false;   // AIが返事をしている間は true（音声認識を止める）
   let busy = false;       // 返事を待っている
   let fillerUrl = null;   // 相づちの音声
   let audioCtx = null, analyser = null, levels = null;
 
-  // 音声の大きさに合わせて、アバターを少し大きくして口の動きに見せる
+  // ---- 参加画面 ----
+  $('key').addEventListener('input', () => {
+    $('join-btn').disabled = !$('key').value.trim();
+  });
+  $('key').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !$('join-btn').disabled) $('join-btn').click();
+  });
+  $('join-btn').onclick = async () => {
+    $('join-btn').disabled = true;
+    $('joinMsg').textContent = '';
+    await resumeAudio();   // 音声は、ボタンを押した後に始める必要がある
+    await loadFiller();
+    $('join').hidden = true;
+    $('room').hidden = false;
+    statusEl.textContent = "準備ができました";
+  };
+
+  // ---- 画像（ブラウザの中だけで扱い、サーバーには送らない） ----
+  $('file').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    pic.onerror = null;
+    pic.style.display = '';
+    pic.src = URL.createObjectURL(f);
+    $('placeholder').hidden = true;
+  });
+  pic.addEventListener('load', () => { $('placeholder').hidden = true; });
+  pic.onerror = () => {
+    pic.style.display = 'none';
+    $('placeholder').hidden = false;
+  };
+  $('fullscreen').onclick = () => {
+    if (stage.requestFullscreen) stage.requestFullscreen();
+    else statusEl.textContent = "このブラウザは全画面に対応していません";
+  };
+
+  // ---- 音声 ----
   function setupAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -82,19 +169,20 @@
     setupAudio();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
   }
+  // 声の大きさに合わせて、画像を少し大きくして口の動きに見せる
   function animate() {
     let scale = 1;
     if (analyser && speaking) {
       analyser.getByteFrequencyData(levels);
       const avg = levels.reduce((a, b) => a + b, 0) / levels.length;
-      scale = 1 + Math.min(avg / 128, 1) * 0.12;
+      scale = 1 + Math.min(avg / 128, 1) * 0.08;
     }
-    wrap.style.transform = `scale(${scale})`;
+    pic.style.transform = `scale(${scale})`;
     requestAnimationFrame(animate);
   }
   animate();
 
-  // 音声認識：櫻井が話している間は止めて、自分の声を拾わないようにする
+  // 音声認識：AIが話している間は止めて、自分の声を拾わないようにする
   function startRec() {
     if (!recognition || !listening || speaking || busy) return;
     try { recognition.start(); } catch (_) { /* すでに動いている */ }
@@ -129,7 +217,7 @@
     return fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
   }
 
-  // 相づちの音声を取っておく（画面を始めるときに一度だけ）
+  // 相づちの音声を取っておく（参加するときに一度だけ）
   async function loadFiller() {
     try {
       const r = await fetch('/api/filler', { headers: authHeaders() });
@@ -214,7 +302,7 @@
         await fillerDone;
         return;
       }
-      subtitle.textContent = `櫻井：${j.reply}`;
+      subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
       const replyP = prepareReply(j.reply);   // 相づちの再生中に、返事の音声を受け取っておく
       await fillerDone;
@@ -238,15 +326,9 @@
     ask(t);
   }
 
-  $('start').onclick = async () => {
-    if (!$('key').value.trim()) {
-      statusEl.textContent = "アクセスキーを入力してください";
-      return;
-    }
-    $('start').disabled = true;
-    $('key').disabled = true;
-    await resumeAudio();   // 音声は、ボタンを押した後に始める必要がある
-    await loadFiller();
+  $('talk').onclick = async () => {
+    $('talk').disabled = true;
+    await resumeAudio();
     beginListening();
   };
   $('send').onclick = submitText;
