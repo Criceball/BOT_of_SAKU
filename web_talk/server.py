@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import hmac
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -25,7 +26,12 @@ load_dotenv(REPO / ".env")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
-PORT = int(os.getenv("WEB_PORT", "8000"))
+# Render などでは PORT が渡される。自分のPCで試すときは WEB_PORT（既定 8000）
+PORT = int(os.getenv("PORT") or os.getenv("WEB_PORT", "8000"))
+# 誰でも使えないように、画面とAPIにアクセスキーを必須にする
+ACCESS_KEY = os.getenv("WEB_ACCESS_KEY", "")
+if not ACCESS_KEY:
+    raise SystemExit("WEB_ACCESS_KEY を設定してください（画面にアクセスするための合言葉です）")
 
 MAX_REPLY_TOKENS = 2048
 HISTORY_LIMIT = 6  # 直近の発言を何件まで覚えるか
@@ -65,6 +71,16 @@ def cut_at_sentence(text: str, limit: int) -> str:
 
 def json_error(message: str, status: int) -> web.Response:
     return web.json_response({"error": message}, status=status)
+
+
+@web.middleware
+async def require_access_key(request: web.Request, handler):
+    # /api/ への呼び出しは、アクセスキーが合っている場合だけ通す
+    if request.path.startswith("/api/"):
+        given = request.headers.get("X-Access-Key", "")
+        if not hmac.compare_digest(given, ACCESS_KEY):
+            return json_error("アクセスキーが違います", 401)
+    return await handler(request)
 
 
 async def index(request: web.Request) -> web.StreamResponse:
@@ -133,7 +149,7 @@ async def reset(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
-app = web.Application()
+app = web.Application(middlewares=[require_access_key])
 app.router.add_get("/", index)
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
@@ -141,5 +157,6 @@ app.router.add_post("/api/tts", tts)
 app.router.add_post("/api/reset", reset)
 
 if __name__ == "__main__":
-    # 自分のPCからだけ見られるように 127.0.0.1 で待ち受ける（ネットワークには公開しない）
-    web.run_app(app, host="127.0.0.1", port=PORT)
+    # Render などの外部サーバーでは 0.0.0.0 で待ち受ける。自分のPCで試すときは 127.0.0.1 にする
+    host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
+    web.run_app(app, host=host, port=PORT)

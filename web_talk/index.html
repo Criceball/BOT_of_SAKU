@@ -39,7 +39,10 @@
 <div id="avatarWrap"><img id="avatar" alt="" src="/avatar.png" onerror="this.remove()"></div>
 <div id="status">準備中</div>
 <div id="subtitle"></div>
-<button id="start">話し始める</button>
+<div class="row">
+  <input id="key" type="password" placeholder="アクセスキー（合言葉）" autocomplete="off">
+  <button id="start">話し始める</button>
+</div>
 <div class="row">
   <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
   <button id="send" class="secondary">送る</button>
@@ -111,10 +114,13 @@
     startRec();
   }
 
+  function authHeaders() {
+    return { 'Content-Type': 'application/json', 'X-Access-Key': $('key').value };
+  }
   async function post(url, body) {
     return fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify(body),
     });
   }
@@ -177,14 +183,19 @@
   }
 
   $('start').onclick = () => {
+    if (!$('key').value.trim()) {
+      statusEl.textContent = "アクセスキーを入力してください";
+      return;
+    }
     $('start').disabled = true;
+    $('key').disabled = true;
     setupAnalyser();  // 音声を扱うには、ボタンを押した後に始める必要がある
     beginListening();
   };
   $('send').onclick = submitText;
   $('text').addEventListener('keydown', e => { if (e.key === 'Enter') submitText(); });
   $('reset').onclick = async () => {
-    await fetch('/api/reset', { method: 'POST' });
+    await fetch('/api/reset', { method: 'POST', headers: authHeaders() });
     subtitle.textContent = '';
   };
 })();
