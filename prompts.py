@@ -1,6 +1,7 @@
 """AIの性格・口調の設定と、プロンプトインジェクション対策。Discordに依存しない。"""
 
 import os
+import re
 from pathlib import Path
 
 # ===== 性格・口調 =====
@@ -68,7 +69,7 @@ def current_persona() -> str:
 
 
 def build_system_prompt() -> str:
-    return f"{current_persona()}\n{LENGTH_RULE}\n{SECURITY_RULES}"
+    return f"{current_persona()}\n{LENGTH_RULE}\n{EMOTION_RULE}\n{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
@@ -115,3 +116,51 @@ TTS_SPEED_CRAZY = 1.4
 
 def tts_speed(crazy: bool) -> float:
     return TTS_SPEED_CRAZY if crazy else TTS_SPEED_NORMAL
+
+
+# ===== 感情のタグ（Groqが返事の文の先頭に付ける。音声の調子と映像の切り替えに使う） =====
+# タグの名前 → 音声（Fish Audio）に渡すタグ。ここを変えると、音声の調子が変わります。
+EMOTION_TAGS = {
+    "happy": "[happy]",      # 喜び
+    "sad": "[sad]",          # 悲しみ
+    "angry": "[angry]",      # 怒り
+    "excited": "[excited]",  # 興奮
+    "calm": "[calm]",        # 落ち着き
+}
+EMOTION_RULE = (
+    "返事の文の先頭に、その文の感情が強いときだけ "
+    + " ".join(f"[{name}]" for name in EMOTION_TAGS)
+    + " のどれかを付けてください。感情が弱い文には付けません。"
+)
+_SENTENCE = re.compile(r"[^。！？]+[。！？]?")
+_LEADING_TAG = re.compile(r"^\s*\[([a-z]+)\]\s*")
+_ANY_TAG = re.compile(r"\[(" + "|".join(EMOTION_TAGS) + r")\]\s*")
+
+
+def parse_emotions(raw: str) -> list[dict]:
+    """返事を文ごとに分け、先頭の感情のタグを取り出す。"""
+    parts = []
+    for match in _SENTENCE.finditer(raw):
+        chunk = match.group(0)
+        emotion = None
+        tag = _LEADING_TAG.match(chunk)
+        if tag and tag.group(1) in EMOTION_TAGS:
+            emotion = tag.group(1)
+            chunk = chunk[tag.end():]
+        text = chunk.strip()
+        if text:
+            parts.append({"emotion": emotion, "text": text})
+    return parts
+
+
+def strip_emotions(raw: str) -> str:
+    """画面やDiscordに出す文字から、感情のタグを消す。"""
+    return _ANY_TAG.sub("", raw)
+
+
+def tts_prefix(crazy: bool, emotion: str | None) -> str:
+    """音声に付けるタグ。感情のタグがあれば、それを使う（狂気時は狂気のタグを前に付ける）。"""
+    emo = EMOTION_TAGS.get(emotion or "", "")
+    if emo:
+        return (TTS_TAGS_CRAZY if crazy else "") + emo
+    return TTS_TAGS_CRAZY if crazy else TTS_TAGS_NORMAL

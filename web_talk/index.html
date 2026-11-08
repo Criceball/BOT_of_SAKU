@@ -126,7 +126,7 @@
     </div>
     <input id="moodFile" type="file" accept="video/*" hidden>
     <ul id="moodList"></ul>
-    <p class="hint">返事の文に言葉が入っていると、その動画を流します。どれも当てはまらなければ「話している時の動画」を流します。</p>
+    <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。どれも当てはまらなければ「話している時の動画」を流します。</p>
   </div>
   </div>
 </section>
@@ -371,8 +371,8 @@
     });
   }
   // 文の中に言葉があれば、その動画を選ぶ（最初に当てはまったもの）
-  function pickVideo(sentence) {
-    const hit = moods.find(m => sentence.includes(m.kw));
+  function pickVideo(emotion, sentence) {
+    const hit = moods.find(m => m.kw === emotion || sentence.includes(m.kw));
     return hit ? hit.url : talkUrl;
   }
 
@@ -464,9 +464,9 @@
 
   // 文ごとの音声を、同時に作り始める（待ち時間を重ねて短くするため）
   let replyCrazy = false;   // 今の返事が狂気時の声か
-  function fetchSentence(text, signal) {
+  function fetchSentence(text, signal, emotion) {
     const job = { ready: false, url: null, promise: null };
-    job.promise = post('/api/tts', { text, crazy: replyCrazy }, signal)
+    job.promise = post('/api/tts', { text, crazy: replyCrazy, emotion }, signal)
       .then(async r => (r.ok ? URL.createObjectURL(await r.blob()) : null))
       .catch(() => null)
       .then(url => { job.ready = true; job.url = url; return url; });
@@ -474,9 +474,8 @@
   }
 
   // できた順に、一文ずつ再生する。音声が間に合わないときは「はい！」で繋ぐ。
-  async function speakReply(text, myGen, signal) {
-    const sentences = splitSentences(text);
-    const jobs = sentences.map(sen => fetchSentence(sen, signal));
+  async function speakReply(sentences, myGen, signal) {
+    const jobs = sentences.map(s => fetchSentence(s.text, signal, s.emotion));
     for (let i = 0; i < jobs.length; i++) {
       const job = jobs[i];
       const gap = job.ready ? null : playFiller();   // 間に合わないときだけ「はい！」
@@ -484,7 +483,7 @@
       stopFiller();
       if (gap) await gap;
       if (myGen !== gen) return;   // 止められた
-      const video = pickVideo(sentences[i]);
+      const video = pickVideo(sentences[i].emotion, sentences[i].text);
       if (video) playVideo(video); else showIdle();
       if (!url) {
         statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
@@ -533,7 +532,7 @@
       }
       subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
-      await speakReply(j.reply, myGen, signal);
+      await speakReply(j.sentences || [{ emotion: null, text: j.reply }], myGen, signal);
     } catch (e) {
       if (myGen === gen) {
         subtitle.textContent = e.name === 'AbortError'
