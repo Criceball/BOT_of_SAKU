@@ -31,7 +31,7 @@
   #join button:disabled { background: #3a4450; color: #8a95a3; cursor: default; }
   #joinMsg { min-height: 1.2em; font-size: 0.9rem; color: #f0a0a0; text-align: center; margin: 0; }
 
-  /* 画面（写真を表示する） */
+  /* 画面 */
   #room {
     min-height: 100vh; display: flex; flex-direction: column; align-items: center;
     gap: 14px; padding: 16px; box-sizing: border-box;
@@ -41,24 +41,29 @@
     overflow: hidden; display: flex; align-items: center; justify-content: center;
     position: relative;
   }
-  #pic {
-    width: 100%; height: 100%; object-fit: contain; display: block;
-    transition: transform 0.05s linear;
-  }
+  #pic, #vid { width: 100%; height: 100%; object-fit: contain; display: block; }
   #placeholder { position: absolute; opacity: 0.6; font-size: 1rem; }
   #stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
-  #stage:fullscreen #pic { object-fit: contain; }
 
   #status { font-size: 0.9rem; opacity: 0.7; min-height: 1.2em; }
   #subtitle {
     min-height: 3em; max-width: 640px; text-align: center; font-size: 1.1rem;
     line-height: 1.7; white-space: pre-wrap; word-break: break-word;
   }
-  .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; justify-content: center; }
+  .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; justify-content: center; align-items: center; }
   .row input[type=text] {
     flex: 1; min-width: 140px; padding: 10px; border-radius: 8px;
     border: 1px solid #556; background: #20262d; color: #eef2f5; font-size: 1rem;
   }
+  .panel {
+    width: 100%; max-width: 640px; border: 1px solid #333c47; border-radius: 10px;
+    padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;
+  }
+  .panel h2 { font-size: 0.95rem; margin: 0; opacity: 0.85; }
+  #moodList { list-style: none; margin: 0; padding: 0; font-size: 0.9rem; }
+  #moodList li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
+  #moodList button { padding: 2px 10px; font-size: 0.85rem; }
+  .hint { font-size: 0.8rem; opacity: 0.6; margin: 0; }
   button, .btn {
     padding: 10px 16px; border-radius: 8px; border: 0; background: #4f8cff;
     color: #fff; font-size: 1rem; cursor: pointer; display: inline-block;
@@ -81,11 +86,13 @@
 
 <section id="room" hidden>
   <div id="stage">
-    <img id="pic" alt="" src="/avatar.png" onerror="this.style.display='none'">
+    <img id="pic" alt="" src="/avatar.png">
+    <video id="vid" playsinline loop muted hidden></video>
     <div id="placeholder">画像を選んでください</div>
   </div>
   <div id="status"></div>
   <div id="subtitle"></div>
+
   <div class="row">
     <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
     <button id="fullscreen" class="secondary">全画面</button>
@@ -96,6 +103,21 @@
     <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
     <button id="send" class="secondary">送る</button>
   </div>
+
+  <div class="panel">
+    <h2>動画（ブラウザの中だけで使い、サーバーには送りません）</h2>
+    <div class="row">
+      <label class="btn secondary">話している時の動画を選ぶ<input id="talkFile" type="file" accept="video/*" hidden></label>
+      <span id="talkName" class="hint">未選択</span>
+    </div>
+    <div class="row">
+      <input id="moodKw" type="text" placeholder="言葉（例：うれしい）" maxlength="20">
+      <button id="moodAdd" class="secondary">動画を選んで追加</button>
+    </div>
+    <input id="moodFile" type="file" accept="video/*" hidden>
+    <ul id="moodList"></ul>
+    <p class="hint">返事の文に言葉が入っていると、その動画を流します。どれも当てはまらなければ「話している時の動画」を流します。</p>
+  </div>
 </section>
 
 <audio id="player"></audio>
@@ -104,6 +126,8 @@
 (() => {
   const $ = id => document.getElementById(id);
   const pic = $('pic');
+  const vid = $('vid');
+  const placeholder = $('placeholder');
   const stage = $('stage');
   const subtitle = $('subtitle');
   const statusEl = $('status');
@@ -116,7 +140,8 @@
   let speaking = false;   // AIが返事をしている間は true（音声認識を止める）
   let busy = false;       // 返事を待っている
   let fillerUrl = null;   // 相づちの音声
-  let audioCtx = null, analyser = null, levels = null;
+  let talkUrl = null;     // 話している時の動画
+  let moods = [];         // [{ kw, url, name }] 言葉ごとの動画
 
   // ---- 参加画面 ----
   $('key').addEventListener('input', () => {
@@ -128,61 +153,97 @@
   $('join-btn').onclick = async () => {
     $('join-btn').disabled = true;
     $('joinMsg').textContent = '';
-    await resumeAudio();   // 音声は、ボタンを押した後に始める必要がある
     await loadFiller();
     $('join').hidden = true;
     $('room').hidden = false;
     statusEl.textContent = "準備ができました";
+    showIdle();
   };
 
   // ---- 画像（ブラウザの中だけで扱い、サーバーには送らない） ----
   $('file').addEventListener('change', e => {
     const f = e.target.files[0];
     if (!f) return;
-    pic.onerror = null;
-    pic.style.display = '';
+    pic.dataset.broken = '';
     pic.src = URL.createObjectURL(f);
-    $('placeholder').hidden = true;
   });
-  pic.addEventListener('load', () => { $('placeholder').hidden = true; });
-  pic.onerror = () => {
-    pic.style.display = 'none';
-    $('placeholder').hidden = false;
+  pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
+  pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
+
+  // 待機中の表示：画像があれば画像、なければ案内の文字
+  function showIdle() {
+    vid.pause();
+    vid.hidden = true;
+    const hasPic = pic.getAttribute('src') && !pic.dataset.broken;
+    pic.hidden = !hasPic;
+    placeholder.hidden = !!hasPic;
+  }
+
+  // 話している間の表示：動画を流す
+  function playVideo(url) {
+    pic.hidden = true;
+    placeholder.hidden = true;
+    vid.src = url;
+    vid.currentTime = 0;
+    vid.hidden = false;
+    vid.play().catch(() => {});
+  }
+
+  // ---- 動画 ----
+  $('talkFile').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (talkUrl) URL.revokeObjectURL(talkUrl);
+    talkUrl = URL.createObjectURL(f);
+    $('talkName').textContent = f.name;
+  });
+  $('moodAdd').onclick = () => {
+    const kw = $('moodKw').value.trim();
+    if (!kw) {
+      statusEl.textContent = "先に言葉を入力してください";
+      return;
+    }
+    $('moodFile').click();
   };
+  $('moodFile').addEventListener('change', e => {
+    const f = e.target.files[0];
+    e.target.value = '';   // 同じファイルを続けて選べるように
+    if (!f) return;
+    moods.push({ kw: $('moodKw').value.trim(), url: URL.createObjectURL(f), name: f.name });
+    $('moodKw').value = '';
+    renderMoods();
+  });
+  function renderMoods() {
+    const list = $('moodList');
+    list.textContent = '';
+    moods.forEach((m, i) => {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `「${m.kw}」→ ${m.name}`;
+      const del = document.createElement('button');
+      del.className = 'secondary';
+      del.textContent = '削除';
+      del.onclick = () => {
+        URL.revokeObjectURL(m.url);
+        moods.splice(i, 1);
+        renderMoods();
+      };
+      li.append(label, del);
+      list.appendChild(li);
+    });
+  }
+  // 文の中に言葉があれば、その動画を選ぶ（最初に当てはまったもの）
+  function pickVideo(sentence) {
+    const hit = moods.find(m => sentence.includes(m.kw));
+    return hit ? hit.url : talkUrl;
+  }
+
   $('fullscreen').onclick = () => {
     if (stage.requestFullscreen) stage.requestFullscreen();
     else statusEl.textContent = "このブラウザは全画面に対応していません";
   };
 
-  // ---- 音声 ----
-  function setupAudio() {
-    if (audioCtx) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 256;
-    levels = new Uint8Array(analyser.frequencyBinCount);
-    analyser.connect(audioCtx.destination);
-    audioCtx.createMediaElementSource(replyEl).connect(analyser);
-    audioCtx.createMediaElementSource(fillerEl).connect(analyser);
-  }
-  async function resumeAudio() {
-    setupAudio();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-  }
-  // 声の大きさに合わせて、画像を少し大きくして口の動きに見せる
-  function animate() {
-    let scale = 1;
-    if (analyser && speaking) {
-      analyser.getByteFrequencyData(levels);
-      const avg = levels.reduce((a, b) => a + b, 0) / levels.length;
-      scale = 1 + Math.min(avg / 128, 1) * 0.08;
-    }
-    pic.style.transform = `scale(${scale})`;
-    requestAnimationFrame(animate);
-  }
-  animate();
-
-  // 音声認識：AIが話している間は止めて、自分の声を拾わないようにする
+  // ---- 音声認識：AIが話している間は止めて、自分の声を拾わないようにする ----
   function startRec() {
     if (!recognition || !listening || speaking || busy) return;
     try { recognition.start(); } catch (_) { /* すでに動いている */ }
@@ -249,12 +310,15 @@
       .catch(() => null);
   }
 
-  // できた順に、一文ずつ再生する。最初の一文が届いたら、すぐ流す。
+  // できた順に、一文ずつ再生する。文ごとに、流す動画を選び直す。
   async function speakReply(text, fillerDone) {
-    const jobs = splitSentences(text).map(fetchSentence);
+    const sentences = splitSentences(text);
+    const jobs = sentences.map(fetchSentence);
     await fillerDone;
-    for (const job of jobs) {
-      const url = await job;
+    for (let i = 0; i < jobs.length; i++) {
+      const url = await jobs[i];
+      const video = pickVideo(sentences[i]);
+      if (video) playVideo(video); else showIdle();
       if (!url) {
         statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
         continue;
@@ -276,7 +340,6 @@
     subtitle.textContent = `あなた：${text}`;
     statusEl.textContent = "考え中…";
     try {
-      await resumeAudio();
       const fillerDone = playFiller();   // 相づちを先に流す
       const r = await post('/api/chat', { text });
       const j = await r.json();
@@ -293,6 +356,7 @@
     } finally {
       busy = false;
       speaking = false;
+      showIdle();
       statusEl.textContent = listening ? "聞いています…" : "";
       startRec();
     }
@@ -305,9 +369,8 @@
     ask(t);
   }
 
-  $('talk').onclick = async () => {
+  $('talk').onclick = () => {
     $('talk').disabled = true;
-    await resumeAudio();
     beginListening();
   };
   $('send').onclick = submitText;
