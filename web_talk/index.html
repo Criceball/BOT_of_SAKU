@@ -41,7 +41,10 @@
     overflow: hidden; display: flex; align-items: center; justify-content: center;
     position: relative;
   }
-  #pic, #vid { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* 基本の画像を下に敷き、動画はその上に重ねる（動画が読み込み中・止まっている間は画像が見える） */
+  #pic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  #vid { opacity: 0; transition: opacity 0.15s; }
+  #vid.on { opacity: 1; }
   #placeholder { position: absolute; opacity: 0.6; font-size: 1rem; }
   #stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
 
@@ -87,7 +90,7 @@
 <section id="room" hidden>
   <div id="stage">
     <img id="pic" alt="" src="/avatar.png">
-    <video id="vid" playsinline loop muted hidden></video>
+    <video id="vid" playsinline loop muted></video>
     <div id="placeholder">画像を選んでください</div>
   </div>
   <div id="status"></div>
@@ -228,29 +231,31 @@
   pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
   pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
 
-  // 待機中の表示：画像があれば画像。なければ動画の最後の一コマ（黒くしない）
+  // 待機中の表示：基本の画像を出す（動画は隠す）。画像がなければ案内の文字
   function showIdle() {
+    vid.classList.remove('on');
+    vid.pause();
     const hasPic = pic.getAttribute('src') && !pic.dataset.broken;
-    const hasVideo = !!vid.dataset.url;
     pic.hidden = !hasPic;
-    vid.hidden = !!hasPic || !hasVideo;
-    placeholder.hidden = !!hasPic || hasVideo;
-    if (hasPic || !hasVideo) vid.pause();
+    placeholder.hidden = !!hasPic;
   }
 
-  // 話している間の表示：動画を流す。同じ動画なら読み直さない。
+  // 話している間の表示：動画を重ねる。読み込み中は、下の基本の画像が見えたままになる
   function playVideo(url) {
-    pic.hidden = true;
     placeholder.hidden = true;
-    vid.hidden = false;
+    pic.hidden = !(pic.getAttribute('src') && !pic.dataset.broken);
     if (vid.dataset.url !== url) {
       vid.dataset.url = url;
       vid.src = url;
     }
     vid.play().catch(() => {});
   }
-  // 繰り返すときに黒くならないよう、終わったら先頭から続けて流す
+  // 動画が止まった・読み込み中のときは、基本の画像に戻す（黒い一コマを出さない）
   vid.preload = 'auto';
+  vid.addEventListener('playing', () => vid.classList.add('on'));
+  vid.addEventListener('waiting', () => vid.classList.remove('on'));
+  vid.addEventListener('emptied', () => vid.classList.remove('on'));
+  // 繰り返すときも黒くしない：終わったら先頭から続けて流す
   vid.addEventListener('ended', () => { vid.currentTime = 0; vid.play().catch(() => {}); });
 
   // ---- 動画 ----
