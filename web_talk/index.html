@@ -237,6 +237,7 @@
     pipWin = null;
     $('room').insertBefore(stage, $('room').firstChild);
     statusEl.textContent = "映像を元の画面に戻しました";
+    showUi();   // 操作パネル（全画面ボタンを含む）をもう一度見せる
   }
   $('pip').onclick = async () => {
     if (!(await openVideoWindow())) statusEl.textContent = "この操作には Chrome 116 以降が必要です";
