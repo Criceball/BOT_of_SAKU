@@ -32,21 +32,22 @@
   #joinMsg { min-height: 1.2em; font-size: 0.9rem; color: #f0a0a0; text-align: center; margin: 0; }
 
   /* 画面 */
-  #room {
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    gap: 14px; padding: 16px; box-sizing: border-box;
-  }
-  #stage {
-    width: min(640px, 92vw); aspect-ratio: 4 / 3; background: #000; border-radius: 12px;
-    overflow: hidden; display: flex; align-items: center; justify-content: center;
-    position: relative;
-  }
+  #room { position: fixed; inset: 0; background: #000; }
+  /* 画面いっぱいに画像・動画を出す（操作パネルは下に重ねて、マウスを動かした時だけ出す） */
+  #stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
   /* 基本の画像を下に敷き、動画はその上に重ねる（動画が読み込み中・止まっている間は画像が見える） */
   #pic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   #vid { opacity: 0; transition: opacity 0.15s; }
   #vid.on { opacity: 1; }
-  #placeholder { position: absolute; opacity: 0.6; font-size: 1rem; }
-  #stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
+  #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 1rem; }
+
+  #ui {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 12px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8) 35%);
+    max-height: 75vh; overflow-y: auto; transition: opacity 0.3s; box-sizing: border-box;
+  }
+  #ui.idle { opacity: 0; pointer-events: none; }
 
   #status { font-size: 0.9rem; opacity: 0.7; min-height: 1.2em; }
   #subtitle {
@@ -73,6 +74,7 @@
   }
   button:disabled { opacity: 0.5; cursor: default; }
   .secondary { background: #3a4450; }
+  .panel { background: rgba(20, 24, 30, 0.85); }
 </style>
 </head>
 <body>
@@ -93,6 +95,7 @@
     <video id="vid" playsinline loop muted></video>
     <div id="placeholder">画像を選んでください</div>
   </div>
+  <div id="ui">
   <div id="status"></div>
   <div id="subtitle"></div>
 
@@ -121,6 +124,7 @@
     <input id="moodFile" type="file" accept="video/*" hidden>
     <ul id="moodList"></ul>
     <p class="hint">返事の文に言葉が入っていると、その動画を流します。どれも当てはまらなければ「話している時の動画」を流します。</p>
+  </div>
   </div>
 </section>
 
@@ -217,7 +221,22 @@
     $('room').hidden = false;
     statusEl.textContent = "準備ができました";
     showIdle();
+    // ブラウザも全画面にして、タブや枠を消す（この操作の中で行う必要がある）
+    document.documentElement.requestFullscreen?.().catch(() => {});
+    showUi();
   };
+
+  // 操作パネルは、マウスやキーを動かした時だけ出す。入力中は消さない。
+  let hideTimer = null;
+  function showUi() {
+    $('ui').classList.remove('idle');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!$('ui').contains(document.activeElement)) $('ui').classList.add('idle');
+    }, 3000);
+  }
+  document.addEventListener('mousemove', showUi);
+  document.addEventListener('keydown', showUi);
 
   // ---- 画像（ブラウザの中だけで扱い、サーバーには送らない） ----
   $('file').addEventListener('change', e => {
@@ -312,9 +331,12 @@
     return hit ? hit.url : talkUrl;
   }
 
+  // 全画面の切り替え（ブラウザごと全画面にして、タブを消す）
   $('fullscreen').onclick = () => {
-    if (stage.requestFullscreen) stage.requestFullscreen();
-    else statusEl.textContent = "このブラウザは全画面に対応していません";
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.().catch(() => {
+      statusEl.textContent = "このブラウザは全画面に対応していません";
+    });
   };
 
   // ---- 音声認識：AIが話している間は止めて、自分の声を拾わないようにする ----
