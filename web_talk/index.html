@@ -23,7 +23,7 @@
     line-height: 1.7; white-space: pre-wrap; word-break: break-word;
   }
   .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; }
-  input[type=text] {
+  input[type=text], input[type=password] {
     flex: 1; min-width: 140px; padding: 10px; border-radius: 8px;
     border: 1px solid #556; background: #20262d; color: #eef2f5; font-size: 1rem;
   }
@@ -49,30 +49,38 @@
   <button id="reset" class="secondary">リセット</button>
 </div>
 <audio id="player"></audio>
+<audio id="filler"></audio>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
   const wrap = $('avatarWrap');
   const subtitle = $('subtitle');
   const statusEl = $('status');
-  const player = $('player');
+  const replyEl = $('player');
+  const fillerEl = $('filler');
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
   let recognition = null;
   let listening = false;  // 話しかけを受け付けている
-  let speaking = false;   // 音声を再生中
+  let speaking = false;   // 櫻井が返事をしている間は true（音声認識を止める）
   let busy = false;       // 返事を待っている
+  let fillerUrl = null;   // 相づちの音声
   let audioCtx = null, analyser = null, levels = null;
 
   // 音声の大きさに合わせて、アバターを少し大きくして口の動きに見せる
-  function setupAnalyser() {
+  function setupAudio() {
     if (audioCtx) return;
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
     levels = new Uint8Array(analyser.frequencyBinCount);
-    audioCtx.createMediaElementSource(player).connect(analyser);
     analyser.connect(audioCtx.destination);
+    audioCtx.createMediaElementSource(replyEl).connect(analyser);
+    audioCtx.createMediaElementSource(fillerEl).connect(analyser);
+  }
+  async function resumeAudio() {
+    setupAudio();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
   }
   function animate() {
     let scale = 1;
@@ -106,7 +114,7 @@
     recognition.interimResults = false;
     recognition.onresult = e => {
       const text = e.results[e.results.length - 1][0].transcript.trim();
-      if (text) ask(text);
+      if (text && !busy && !speaking) ask(text);
     };
     recognition.onend = () => startRec();
     listening = true;
@@ -118,59 +126,107 @@
     return { 'Content-Type': 'application/json', 'X-Access-Key': $('key').value };
   }
   async function post(url, body) {
-    return fetch(url, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify(body),
+    return fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+  }
+
+  // 相づちの音声を取っておく（画面を始めるときに一度だけ）
+  async function loadFiller() {
+    try {
+      const r = await fetch('/api/filler', { headers: authHeaders() });
+      if (r.ok) fillerUrl = URL.createObjectURL(await r.blob());
+    } catch (_) { /* 相づちなしで動く */ }
+  }
+
+  // 相づちを流して、終わったら resolve する
+  function playFiller() {
+    if (!fillerUrl) return Promise.resolve();
+    return new Promise(resolve => {
+      fillerEl.onended = resolve;
+      fillerEl.onerror = resolve;
+      fillerEl.src = fillerUrl;
+      fillerEl.play().catch(resolve);
     });
   }
 
-  async function speak(text) {
+  // 返事の音声を受け取る。届いた部分から再生できるように、MediaSource に少しずつ入れる。
+  // 再生は play() を呼ぶまで始めない（相づちが終わってから始めるため）。
+  async function prepareReply(text) {
     const r = await post('/api/tts', { text });
+    const none = { play: async () => {}, ended: Promise.resolve() };
     if (!r.ok) {
       statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
-      return;
+      return none;
     }
-    const blob = await r.blob();
-    setupAnalyser();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-    player.src = URL.createObjectURL(blob);
-    const done = () => {
-      speaking = false;
-      statusEl.textContent = listening ? "聞いています…" : "";
-      startRec();
+    const ended = new Promise(resolve => {
+      replyEl.onended = resolve;
+      replyEl.onerror = resolve;
+    });
+
+    if (!window.MediaSource || !MediaSource.isTypeSupported('audio/mpeg')) {
+      // 途中再生に対応していないブラウザでは、全部受け取ってから再生する
+      replyEl.src = URL.createObjectURL(await r.blob());
+      return { play: () => replyEl.play().catch(() => {}), ended };
+    }
+
+    const ms = new MediaSource();
+    replyEl.src = URL.createObjectURL(ms);
+    await new Promise(resolve => ms.addEventListener('sourceopen', resolve, { once: true }));
+    const sb = ms.addSourceBuffer('audio/mpeg');
+    const idle = () => new Promise(resolve => {
+      if (!sb.updating) resolve();
+      else sb.addEventListener('updateend', resolve, { once: true });
+    });
+    const feed = (async () => {
+      try {
+        const reader = r.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await idle();
+          sb.appendBuffer(value);
+        }
+        await idle();
+        if (ms.readyState === 'open') ms.endOfStream();
+      } catch (_) {
+        if (ms.readyState === 'open') ms.endOfStream();
+      }
+    })();
+    return {
+      play: () => replyEl.play().catch(() => {}),
+      ended: feed.then(() => ended),
     };
-    player.onended = done;
-    player.onerror = done;
-    speaking = true;
-    stopRec();
-    statusEl.textContent = "話しています…";
-    try {
-      await player.play();
-    } catch (e) {
-      done();
-    }
   }
 
   async function ask(text) {
     if (busy) return;
     busy = true;
+    speaking = true;   // 相づちと返事の間は、音声認識を止める
+    stopRec();
     subtitle.textContent = `あなた：${text}`;
     statusEl.textContent = "考え中…";
     try {
+      await resumeAudio();
+      const fillerDone = playFiller();   // 相づちを先に流す
       const r = await post('/api/chat', { text });
       const j = await r.json();
       if (!r.ok) {
         subtitle.textContent = j.error || "エラーが発生しました";
+        await fillerDone;
         return;
       }
       subtitle.textContent = `櫻井：${j.reply}`;
-      await speak(j.reply);
+      statusEl.textContent = "話しています…";
+      const replyP = prepareReply(j.reply);   // 相づちの再生中に、返事の音声を受け取っておく
+      await fillerDone;
+      const reply = await replyP;
+      await reply.play();
+      await reply.ended;
     } catch (e) {
       subtitle.textContent = `通信エラー：${e}`;
     } finally {
       busy = false;
-      if (!speaking) statusEl.textContent = listening ? "聞いています…" : "";
+      speaking = false;
+      statusEl.textContent = listening ? "聞いています…" : "";
       startRec();
     }
   }
@@ -182,14 +238,15 @@
     ask(t);
   }
 
-  $('start').onclick = () => {
+  $('start').onclick = async () => {
     if (!$('key').value.trim()) {
       statusEl.textContent = "アクセスキーを入力してください";
       return;
     }
     $('start').disabled = true;
     $('key').disabled = true;
-    setupAnalyser();  // 音声を扱うには、ボタンを押した後に始める必要がある
+    await resumeAudio();   // 音声は、ボタンを押した後に始める必要がある
+    await loadFiller();
     beginListening();
   };
   $('send').onclick = submitText;
