@@ -5,6 +5,7 @@
 
 import asyncio
 import hmac
+import logging
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -216,4 +217,8 @@ app.router.add_post("/api/reset", reset)
 if __name__ == "__main__":
     # Render などの外部サーバーでは 0.0.0.0 で待ち受ける。自分のPCで試すときは 127.0.0.1 にする
     host = "0.0.0.0" if os.getenv("PORT") else "127.0.0.1"
-    web.run_app(app, host=host, port=PORT)
+    # アクセスの記録（いつ、どのリクエストが来て、何秒で応答したか）をログに出す
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    access_log = logging.getLogger("aiohttp.access")
+    access_log.setLevel(logging.INFO)
+    web.run_app(app, host=host, port=PORT, access_log=access_log)
