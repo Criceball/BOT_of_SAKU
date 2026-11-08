@@ -126,7 +126,7 @@
     </div>
     <input id="moodFile" type="file" accept="video/*" hidden>
     <ul id="moodList"></ul>
-    <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事のすべての文で流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
+    <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
   </div>
   </div>
 </section>
@@ -372,13 +372,16 @@
   }
   // 文の中に言葉があれば、その動画を選ぶ（最初に当てはまったもの）
   function pickVideo(emotion, sentence) {
-    // 狂気時の返事は、言葉「狂気」の動画を、すべての文で流す（いちばん優先）
+    // 1. 言葉（または感情のタグ）に反応したら、その動画（狂気時でも優先）
+    const hit = moods.find(m => m.kw !== '狂気' && (m.kw === emotion || sentence.includes(m.kw)));
+    if (hit) return hit.url;
+    // 2. 狂気時の返事で、言葉に反応しなかった文は「狂気」の動画
     if (replyCrazy) {
       const crazy = moods.find(m => m.kw === '狂気');
       if (crazy) return crazy.url;
     }
-    const hit = moods.find(m => m.kw !== '狂気' && (m.kw === emotion || sentence.includes(m.kw)));
-    return hit ? hit.url : talkUrl;
+    // 3. それ以外は「話している時の動画」
+    return talkUrl;
   }
 
   // 全画面の切り替え（ブラウザごと全画面にして、タブを消す）
