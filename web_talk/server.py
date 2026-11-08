@@ -44,7 +44,7 @@ fish_client = FishAudio(api_key=os.getenv("FISH_API_KEY"))
 fish_async = AsyncFishAudio(api_key=os.getenv("FISH_API_KEY"))
 
 # 返事を作っている間に流す相づち（起動時に一度だけ音声を作って、使い回す）
-FILLER_TEXT = "はい！はい！ちょっと待ってくださいね。"
+FILLER_TEXT = "はい！"
 filler_audio: dict = {}
 
 history: list[dict] = []

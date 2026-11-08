@@ -75,6 +75,8 @@
   button:disabled { opacity: 0.5; cursor: default; }
   .secondary { background: #3a4450; }
   .panel { background: rgba(20, 24, 30, 0.85); }
+  /* 全画面のときは、操作パネルを出さない（Escで戻れます） */
+  html.fs #ui { display: none; }
 </style>
 </head>
 <body>
@@ -275,6 +277,9 @@
       if (!$('ui').contains(document.activeElement)) $('ui').classList.add('idle');
     }, 3000);
   }
+  document.addEventListener('fullscreenchange', () => {
+    document.documentElement.classList.toggle('fs', !!document.fullscreenElement);
+  });
   document.addEventListener('mousemove', showUi);
   document.addEventListener('keydown', showUi);
 
@@ -432,15 +437,23 @@
 
   // 相づちを流して、終わったら resolve する（止めたときも resolve する）
   let resolveFiller = null, resolvePlay = null;
+  // 返事が来るまで「はい！」を繰り返す
   function playFiller() {
     if (!fillerUrl) return Promise.resolve();
     return new Promise(resolve => {
       resolveFiller = resolve;
-      fillerEl.onended = resolve;
       fillerEl.onerror = resolve;
+      fillerEl.loop = true;
       fillerEl.src = fillerUrl;
       fillerEl.play().catch(resolve);
     });
+  }
+  // 返事が来たら、すぐ「はい！」を止める
+  function stopFiller() {
+    fillerEl.loop = false;
+    fillerEl.pause();
+    if (resolveFiller) resolveFiller();
+    resolveFiller = null;
   }
 
   // 返事を文ごとに区切る（。！？の後で切る）
@@ -494,6 +507,7 @@
     speaking = true;   // 相づちと返事の間は、音声認識を止める
     stopRec();
     const myGen = ++gen;
+    showIdle();   // 待っている間は、話している時の動画を流さない
     abortCtl = new AbortController();
     const signal = abortCtl.signal;
     subtitle.textContent = `あなた：${text}`;
@@ -503,6 +517,7 @@
       const r = await post('/api/chat', { text }, signal);
       const j = await r.json();
       if (myGen !== gen) return;
+      stopFiller();   // 返事が来たので「はい！」を止める
       if (!r.ok) {
         subtitle.textContent = j.error || "エラーが発生しました";
         await fillerDone;
@@ -519,6 +534,7 @@
       }
     } finally {
       if (myGen === gen) {
+        stopFiller();
         busy = false;
         speaking = false;
         abortCtl = null;
@@ -535,9 +551,9 @@
     if (abortCtl) abortCtl.abort();
     replyEl.pause();
     fillerEl.pause();
-    if (resolveFiller) resolveFiller();
+    stopFiller();
     if (resolvePlay) resolvePlay();
-    resolveFiller = resolvePlay = null;
+    resolvePlay = null;
     busy = false;
     speaking = false;
     abortCtl = null;
