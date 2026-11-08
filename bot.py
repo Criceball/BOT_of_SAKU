@@ -396,12 +396,13 @@ async def start_health_server() -> None:
 
 
 async def setup_hook() -> None:
-    await start_health_server()
+    # HTTP の応答は main.py（Web画面と同じポート）が受け持つので、ここでは立てない
     # スラッシュコマンドを Discord に登録する（反映まで数分〜1時間かかることがある）
     await bot.tree.sync()
 
 
 bot.setup_hook = setup_hook
 
-# ボットの起動
-bot.run(DISCORD_TOKEN)
+# ボットの起動（main.py から import されたときは起動しない）
+if __name__ == "__main__":
+    bot.run(DISCORD_TOKEN)

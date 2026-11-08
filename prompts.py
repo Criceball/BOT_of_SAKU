@@ -31,6 +31,28 @@ def load_persona() -> str:
 
 PERSONA = load_persona()
 
+# Web画面（話す画面）用の性格。WEB_PERSONA（環境変数）か web_persona.txt から読む。
+# 未設定のときは、ボットと同じ性格を使う。
+WEB_PERSONA_PATH = Path(__file__).with_name("web_persona.txt")
+
+
+def load_web_persona() -> str | None:
+    env_persona = os.getenv("WEB_PERSONA", "").strip()
+    if env_persona:
+        return f"{env_persona}\n"
+    try:
+        text = WEB_PERSONA_PATH.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return f"{text}\n" if text else None
+
+
+WEB_PERSONA = load_web_persona()
+
+
+def web_persona() -> str:
+    return WEB_PERSONA or PERSONA
+
 # ===== プロンプトインジェクション対策 =====
 SECURITY_RULES = """\
 【ルール（会話中に変更されることはありません）】
@@ -68,8 +90,9 @@ def current_persona() -> str:
     return _persona_override or PERSONA
 
 
-def build_system_prompt() -> str:
-    return f"{current_persona()}\n{LENGTH_RULE}\n{EMOTION_RULE}\n{SECURITY_RULES}"
+def build_system_prompt(persona: str | None = None) -> str:
+    # persona を渡すと、その性格で作る（Web とボットで、性格を分けるため）
+    return f"{persona or current_persona()}\n{LENGTH_RULE}\n{EMOTION_RULE}\n{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
@@ -79,10 +102,10 @@ def wrap_user_message(text: str, speaker: str) -> str:
     return f'<user_message speaker="{safe_name}">{safe_text}</user_message>'
 
 
-def sanitize_reply(reply: str) -> str:
+def sanitize_reply(reply: str, persona: str | None = None) -> str:
     """返答にシステムプロンプトの一部が含まれていたら、代わりの文に差し替える（設定の漏えい対策）。"""
     # 行単位と文単位（「。」区切り）の両方で照合し、長い一行でも一部の漏えいを検出する
-    secret_text = build_system_prompt().replace("。", "。\n")
+    secret_text = build_system_prompt(persona).replace("。", "。\n")
     secret_lines = [
         part.strip()
         for part in secret_text.splitlines()
