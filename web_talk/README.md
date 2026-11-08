@@ -1,30 +1,34 @@
 # 話せる画面（Discord の画面共有で使う）
 
-Discord を使わずに、ブラウザで櫻井と会話する画面です。自分のPCで動かして、Chrome の画面を Discord で画面共有します。
+Discord のボットを使わず、ブラウザで櫻井と会話する画面です。サーバーは Render などに置き、自分の PC では Chrome を開くだけで使えます。その Chrome の画面を Discord で画面共有して、みんなに見せます。
 
-## 準備
+## 1. Render にデプロイする
 
-1. リポジトリ直下の `.env` に、次の値を書きます（ボットと同じものです）。
-   - `GROQ_API_KEY`
-   - `FISH_API_KEY`
-   - `FISH_REFERENCE_ID`
-   - 任意：`GROQ_MODEL`、`FISH_MODEL`、`WEB_PORT`
-2. 依存パッケージを入れます（リポジトリ直下で）。
-   ```
-   pip install -r requirements.txt
-   ```
-3. 性格の設定は、リポジトリ直下の `persona.txt` を使います。
-4. 任意：`web_talk/avatar.png` を置くと、そのアイコンが表示されます。実在の人の写真は、本人の許可がある場合だけ使ってください。
+Render の **Web Service** を、このリポジトリ（`feature/web-talk` ブランチ、または `main`）から作ります。
 
-## 起動
+- **Runtime**：Docker（リポジトリ直下の Dockerfile を使う）
+- **Docker Command（起動コマンド）**：`python web_talk/server.py`（ボット用の `bot.py` ではなく、こちらを起動します）
+- **環境変数（Secret として設定）**：
+  - `GROQ_API_KEY`
+  - `FISH_API_KEY`
+  - `FISH_REFERENCE_ID`
+  - `PERSONA`（性格の設定。`persona.txt` の中身をそのまま貼る）
+  - `WEB_ACCESS_KEY`（**必須**。画面を開く人に教える合言葉です。これがないと起動しません）
+  - 任意：`GROQ_MODEL`、`FISH_MODEL`
 
-```
-python web_talk/server.py
-```
+デプロイできたら、発行された URL（例：`https://xxxx.onrender.com`）を開きます。Render は HTTPS なので、Chrome の音声認識も使えます。
 
-Chrome で `http://127.0.0.1:8000` を開き、「話し始める」を押します。
+## 2. スリープを防ぐ（任意）
 
-## Discord で見せる
+無料プランは 15 分間アクセスがないとスリープします。前に話した UptimeRobot で、URL（`/`）を 5 分ごとに確認すると、起きたままになります。
+
+## 3. 使う
+
+1. Chrome で URL を開く。
+2. 合言葉（`WEB_ACCESS_KEY`）を入力して、「話し始める」を押す。マイクの許可を出す。
+3. 話しかける（文字で入力もできます）。
+
+## 4. Discord で見せる
 
 1. Discord のボイスチャンネルに入る。
 2. 「画面共有」を押して、**Chrome のタブ** を選ぶ。
@@ -33,7 +37,17 @@ Chrome で `http://127.0.0.1:8000` を開き、「話し始める」を押しま
 ## 注意
 
 - **ヘッドホンを使ってください。** スピーカーの音を拾うと、自分の声と櫻井の声が混ざります。
-- 音声認識は Chrome の機能で、音声が Google に送られます。
-- 話せるのは、この画面を開いた人だけです。複数人の声は拾えません。
-- サーバーは `127.0.0.1` だけで待ち受けるので、同じネットワークの他の人からは見えません。
+- 音声認識は Chrome の機能で、話した内容が Google に送られます。
+- 合言葉を知っている人だけが使えます。合言葉は、見せたい人だけに教えてください。
 - 1日のトークン上限（18万）を超えると、「もうあなたとは話したくない」と返します。
+- 話せるのは、画面を開いた人だけです。複数人の声は拾えません。
+- 再起動すると、会話の履歴は消えます。
+
+## 自分の PC で試す場合（任意）
+
+```
+pip install -r requirements.txt
+python web_talk/server.py
+```
+
+`.env` に `WEB_ACCESS_KEY` を入れると、`http://127.0.0.1:8000` で開けます。ここでは PC の中だけで動くので、外からは見えません。
