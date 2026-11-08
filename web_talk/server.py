@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-from prompts import MAX_CHAT_CHARS, build_system_prompt, is_crazy, sanitize_reply, tts_tags, wrap_user_message  # noqa: E402
+from prompts import MAX_CHAT_CHARS, build_system_prompt, is_crazy, sanitize_reply, tts_speed, tts_tags, wrap_user_message  # noqa: E402
 
 load_dotenv(REPO / ".env")
 
@@ -139,13 +139,15 @@ async def tts(request: web.Request) -> web.StreamResponse:
     if not text:
         return json_error("読み上げる文字がありません", 400)
     # 感情のタグ（角かっこ）を付けて、声の調子を変える
-    text = tts_tags(bool(data.get("crazy"))) + text
+    crazy = bool(data.get("crazy"))
+    text = tts_tags(crazy) + text
     try:
         stream = await fish_async.tts.stream(
             text=text,
             reference_id=FISH_REFERENCE_ID,
             format="mp3",
             model=FISH_MODEL,
+            speed=tts_speed(crazy),
         )
     except Exception as e:
         return json_error(f"音声の生成に失敗しました: {e}", 502)

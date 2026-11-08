@@ -27,6 +27,7 @@ from prompts import (
     reset_persona,
     sanitize_reply,
     set_persona,
+    tts_speed,
     tts_tags,
     wrap_user_message,
 )
@@ -141,6 +142,7 @@ async def synthesize_speech(text: str, crazy: bool = False) -> bytes:
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
         model=FISH_MODEL,
+        speed=tts_speed(crazy),
     )
 
 

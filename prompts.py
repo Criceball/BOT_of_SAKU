@@ -106,3 +106,12 @@ def is_crazy(user_text: str) -> bool:
 
 def tts_tags(crazy: bool) -> str:
     return TTS_TAGS_CRAZY if crazy else TTS_TAGS_NORMAL
+
+
+# 話す速さ（1.0が普通、2.0が最大）。狂気時は速くする
+TTS_SPEED_NORMAL = 1.0
+TTS_SPEED_CRAZY = 1.4
+
+
+def tts_speed(crazy: bool) -> float:
+    return TTS_SPEED_CRAZY if crazy else TTS_SPEED_NORMAL
