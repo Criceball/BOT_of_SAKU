@@ -2,3 +2,6 @@
 
 # 性格の設定（公開しないため、Gitに含めない）
 persona.txt
+
+# Python cache
+__pycache__/

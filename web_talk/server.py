@@ -161,18 +161,26 @@ async def filler(request: web.Request) -> web.Response:
     return web.Response(body=filler_audio["data"], content_type="audio/mpeg")
 
 
-async def load_filler(app: web.Application) -> None:
-    # 起動時に相づちの音声を作る（失敗しても、画面は相づちなしで動く）
+async def _make_filler() -> None:
     try:
-        filler_audio["data"] = await asyncio.to_thread(
-            fish_client.tts.convert,
-            text=FILLER_TEXT,
-            reference_id=FISH_REFERENCE_ID,
-            format="mp3",
-            model=FISH_MODEL,
+        # Fish の応答が遅くても止まらないように、時間の上限を付ける
+        filler_audio["data"] = await asyncio.wait_for(
+            asyncio.to_thread(
+                fish_client.tts.convert,
+                text=FILLER_TEXT,
+                reference_id=FISH_REFERENCE_ID,
+                format="mp3",
+                model=FISH_MODEL,
+            ),
+            timeout=30,
         )
     except Exception as e:
         print(f"相づちの音声を作れませんでした: {e}")
+
+
+async def load_filler(app: web.Application) -> None:
+    # 相づちの音声は、後ろで作る。終わるのを待つと、画面が開くまで時間がかかるため
+    app["filler_task"] = asyncio.create_task(_make_filler())
 
 
 async def reset(request: web.Request) -> web.Response:
