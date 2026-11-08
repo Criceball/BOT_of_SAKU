@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>櫻井と話す</title>
+<title>AIと話す</title>
 <style>
   :root { color-scheme: dark; }
   [hidden] { display: none !important; }
@@ -71,7 +71,7 @@
 
 <section id="join">
   <div class="card">
-    <h1>櫻井と話す</h1>
+    <h1>AIと話す</h1>
     <label for="key">アクセスキー</label>
     <input id="key" type="password" autocomplete="off" placeholder="アクセスキーを入力">
     <button id="join-btn" disabled>参加</button>
@@ -113,7 +113,7 @@
 
   let recognition = null;
   let listening = false;  // 話しかけを受け付けている
-  let speaking = false;   // 櫻井が返事をしている間は true（音声認識を止める）
+  let speaking = false;   // AIが返事をしている間は true（音声認識を止める）
   let busy = false;       // 返事を待っている
   let fillerUrl = null;   // 相づちの音声
   let audioCtx = null, analyser = null, levels = null;
@@ -182,7 +182,7 @@
   }
   animate();
 
-  // 音声認識：櫻井が話している間は止めて、自分の声を拾わないようにする
+  // 音声認識：AIが話している間は止めて、自分の声を拾わないようにする
   function startRec() {
     if (!recognition || !listening || speaking || busy) return;
     try { recognition.start(); } catch (_) { /* すでに動いている */ }
@@ -302,7 +302,7 @@
         await fillerDone;
         return;
       }
-      subtitle.textContent = `櫻井：${j.reply}`;
+      subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
       const replyP = prepareReply(j.reply);   // 相づちの再生中に、返事の音声を受け取っておく
       await fillerDone;
