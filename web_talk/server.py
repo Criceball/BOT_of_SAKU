@@ -19,7 +19,17 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-from prompts import MAX_CHAT_CHARS, build_system_prompt, is_crazy, sanitize_reply, tts_tags, wrap_user_message  # noqa: E402
+from prompts import (  # noqa: E402
+    MAX_CHAT_CHARS,
+    build_system_prompt,
+    is_crazy,
+    parse_emotions,
+    sanitize_reply,
+    strip_emotions,
+    tts_prefix,
+    tts_speed,
+    wrap_user_message,
+)
 
 load_dotenv(REPO / ".env")
 
@@ -126,10 +136,11 @@ async def chat(request: web.Request) -> web.Response:
 
     if completion.usage:
         add_usage(completion.usage.total_tokens)
-    reply = sanitize_reply(completion.choices[0].message.content or "")
+    raw = sanitize_reply(completion.choices[0].message.content or "")
+    reply = strip_emotions(raw)
     history.append({"role": "assistant", "content": reply[:300]})
     del history[:-HISTORY_LIMIT]
-    return web.json_response({"reply": reply, "crazy": crazy})
+    return web.json_response({"reply": reply, "crazy": crazy, "sentences": parse_emotions(raw)})
 
 
 async def tts(request: web.Request) -> web.StreamResponse:
@@ -139,13 +150,15 @@ async def tts(request: web.Request) -> web.StreamResponse:
     if not text:
         return json_error("読み上げる文字がありません", 400)
     # 感情のタグ（角かっこ）を付けて、声の調子を変える
-    text = tts_tags(bool(data.get("crazy"))) + text
+    crazy = bool(data.get("crazy"))
+    text = tts_prefix(crazy, data.get("emotion")) + text
     try:
         stream = await fish_async.tts.stream(
             text=text,
             reference_id=FISH_REFERENCE_ID,
             format="mp3",
             model=FISH_MODEL,
+            speed=tts_speed(crazy),
         )
     except Exception as e:
         return json_error(f"音声の生成に失敗しました: {e}", 502)

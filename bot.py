@@ -27,7 +27,10 @@ from prompts import (
     reset_persona,
     sanitize_reply,
     set_persona,
-    tts_tags,
+    tts_speed,
+    parse_emotions,
+    strip_emotions,
+    tts_prefix,
     wrap_user_message,
 )
 
@@ -137,10 +140,11 @@ async def synthesize_speech(text: str, crazy: bool = False) -> bytes:
     # 音声生成も同期APIのため、別スレッドで実行する。感情のタグを付けて声の調子を変える
     return await asyncio.to_thread(
         fish_client.tts.convert,
-        text=tts_tags(crazy) + text,
+        text=tts_prefix(crazy, None) + text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
         model=FISH_MODEL,
+        speed=tts_speed(crazy),
     )
 
 
@@ -271,7 +275,7 @@ async def handle_mention(message: discord.Message) -> None:
                 await message.reply(f"⚠️ エラーが発生しました: `{e}`")
             return
 
-    reply_text = sanitize_reply(reply_text)
+    reply_text = strip_emotions(sanitize_reply(reply_text))
     history.append({"role": "assistant", "content": reply_text[:HISTORY_CHAR_LIMIT]})
     # AIの返答で @everyone などが鳴らないように、メンションを無効にする
     await message.reply(
@@ -307,7 +311,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
         ])
         record_tokens(used_tokens)
-        reply_text = sanitize_reply(raw_reply)[:DISCORD_MESSAGE_LIMIT - 10]
+        reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
         # 音声にする分は短くして、音声の料金を抑える
         audio_bytes = await synthesize_speech(
