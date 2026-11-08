@@ -97,6 +97,7 @@
     <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
     <button id="fullscreen" class="secondary">全画面</button>
     <button id="talk">話し始める</button>
+    <button id="stop" class="secondary">話すのをやめる</button>
     <button id="reset" class="secondary">リセット</button>
   </div>
   <div class="row">
@@ -227,24 +228,30 @@
   pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
   pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
 
-  // 待機中の表示：画像があれば画像、なければ案内の文字
+  // 待機中の表示：画像があれば画像。なければ動画の最後の一コマ（黒くしない）
   function showIdle() {
-    vid.pause();
-    vid.hidden = true;
     const hasPic = pic.getAttribute('src') && !pic.dataset.broken;
+    const hasVideo = !!vid.dataset.url;
     pic.hidden = !hasPic;
-    placeholder.hidden = !!hasPic;
+    vid.hidden = !!hasPic || !hasVideo;
+    placeholder.hidden = !!hasPic || hasVideo;
+    if (hasPic || !hasVideo) vid.pause();
   }
 
-  // 話している間の表示：動画を流す
+  // 話している間の表示：動画を流す。同じ動画なら読み直さない。
   function playVideo(url) {
     pic.hidden = true;
     placeholder.hidden = true;
-    vid.src = url;
-    vid.currentTime = 0;
     vid.hidden = false;
+    if (vid.dataset.url !== url) {
+      vid.dataset.url = url;
+      vid.src = url;
+    }
     vid.play().catch(() => {});
   }
+  // 繰り返すときに黒くならないよう、終わったら先頭から続けて流す
+  vid.preload = 'auto';
+  vid.addEventListener('ended', () => { vid.currentTime = 0; vid.play().catch(() => {}); });
 
   // ---- 動画 ----
   $('talkFile').addEventListener('change', e => {
@@ -336,8 +343,16 @@
   function authHeaders() {
     return { 'Content-Type': 'application/json', 'X-Access-Key': $('key').value };
   }
-  async function post(url, body) {
-    return fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+  // 通信が止まっても返事が止まらないように、30秒で打ち切る。止めるボタンでも中断できる。
+  async function post(url, body, signal) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000);
+    if (signal) signal.addEventListener('abort', () => ctl.abort());
+    try {
+      return await fetch(url, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body), signal: ctl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // 相づちの音声を取っておく（参加するときに一度だけ）
@@ -348,10 +363,12 @@
     } catch (_) { /* 相づちなしで動く */ }
   }
 
-  // 相づちを流して、終わったら resolve する
+  // 相づちを流して、終わったら resolve する（止めたときも resolve する）
+  let resolveFiller = null, resolvePlay = null;
   function playFiller() {
     if (!fillerUrl) return Promise.resolve();
     return new Promise(resolve => {
+      resolveFiller = resolve;
       fillerEl.onended = resolve;
       fillerEl.onerror = resolve;
       fillerEl.src = fillerUrl;
@@ -366,19 +383,20 @@
   }
 
   // 文ごとの音声を、同時に作り始める（待ち時間を重ねて短くするため）
-  function fetchSentence(text) {
-    return post('/api/tts', { text })
+  function fetchSentence(text, signal) {
+    return post('/api/tts', { text }, signal)
       .then(async r => (r.ok ? URL.createObjectURL(await r.blob()) : null))
       .catch(() => null);
   }
 
   // できた順に、一文ずつ再生する。文ごとに、流す動画を選び直す。
-  async function speakReply(text, fillerDone) {
+  async function speakReply(text, fillerDone, myGen, signal) {
     const sentences = splitSentences(text);
-    const jobs = sentences.map(fetchSentence);
+    const jobs = sentences.map(sen => fetchSentence(sen, signal));
     await fillerDone;
     for (let i = 0; i < jobs.length; i++) {
       const url = await jobs[i];
+      if (myGen !== gen) return;   // 止められた
       const video = pickVideo(sentences[i]);
       if (video) playVideo(video); else showIdle();
       if (!url) {
@@ -386,25 +404,38 @@
         continue;
       }
       await new Promise(resolve => {
+        resolvePlay = resolve;
         replyEl.onended = resolve;
         replyEl.onerror = resolve;
         replyEl.src = url;
         replyEl.play().catch(resolve);
       });
+      resolvePlay = null;
+      if (myGen !== gen) return;
     }
   }
 
+  let gen = 0;            // 返事ごとの番号。止めると番号が変わり、古い返事はやめる
+  let abortCtl = null;    // 進行中の通信を中断するためのもの
+
   async function ask(text) {
-    if (busy) return;
+    if (busy) {
+      statusEl.textContent = "返事の途中です。終わるか「話すのをやめる」を押してください";
+      return;
+    }
     busy = true;
     speaking = true;   // 相づちと返事の間は、音声認識を止める
     stopRec();
+    const myGen = ++gen;
+    abortCtl = new AbortController();
+    const signal = abortCtl.signal;
     subtitle.textContent = `あなた：${text}`;
     statusEl.textContent = "考え中…";
     try {
       const fillerDone = playFiller();   // 相づちを先に流す
-      const r = await post('/api/chat', { text });
+      const r = await post('/api/chat', { text }, signal);
       const j = await r.json();
+      if (myGen !== gen) return;
       if (!r.ok) {
         subtitle.textContent = j.error || "エラーが発生しました";
         await fillerDone;
@@ -412,21 +443,50 @@
       }
       subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
-      await speakReply(j.reply, fillerDone);
+      await speakReply(j.reply, fillerDone, myGen, signal);
     } catch (e) {
-      subtitle.textContent = `通信エラー：${e}`;
+      if (myGen === gen) {
+        subtitle.textContent = e.name === 'AbortError'
+          ? "時間がかかりすぎたので、止めました"
+          : `通信エラー：${e}`;
+      }
     } finally {
-      busy = false;
-      speaking = false;
-      showIdle();
-      statusEl.textContent = listening ? "聞いています…" : "";
-      startRec();
+      if (myGen === gen) {
+        busy = false;
+        speaking = false;
+        abortCtl = null;
+        showIdle();
+        statusEl.textContent = listening ? "聞いています…" : "";
+        startRec();
+      }
     }
   }
+
+  // 話すのをやめる：返事の音声と動画を止め、進行中の返事を捨てる
+  function stopSpeaking() {
+    gen++;
+    if (abortCtl) abortCtl.abort();
+    replyEl.pause();
+    fillerEl.pause();
+    if (resolveFiller) resolveFiller();
+    if (resolvePlay) resolvePlay();
+    resolveFiller = resolvePlay = null;
+    busy = false;
+    speaking = false;
+    abortCtl = null;
+    showIdle();
+    statusEl.textContent = listening ? "聞いています…" : "話すのをやめました";
+    startRec();
+  }
+  $('stop').onclick = stopSpeaking;
 
   function submitText() {
     const t = $('text').value.trim();
     if (!t) return;
+    if (busy) {
+      statusEl.textContent = "返事の途中です。終わるか「話すのをやめる」を押してください";
+      return;   // 入力は残しておく（消えないように）
+    }
     $('text').value = '';
     ask(t);
   }
@@ -436,7 +496,7 @@
     beginListening();
   };
   $('send').onclick = submitText;
-  $('text').addEventListener('keydown', e => { if (e.key === 'Enter') submitText(); });
+  $('text').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) submitText(); });
   $('reset').onclick = async () => {
     await fetch('/api/reset', { method: 'POST', headers: authHeaders() });
     subtitle.textContent = '';

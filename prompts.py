@@ -49,7 +49,7 @@ FALLBACK_REPLY = "ごめんなさい、その内容にはお答えできませ�
 LENGTH_RULE = "返答は300文字程度で答えてください。"
 
 
-# Discordの !persona コマンドで変えた性格（再起動すると消えて、persona.txt / PERSONA の設定に戻る）
+# Discordの /persona コマンドで変えた性格（再起動すると消えて、persona.txt / PERSONA の設定に戻る）
 _persona_override: str | None = None
 
 
