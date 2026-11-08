@@ -12,7 +12,7 @@ from pathlib import Path
 
 from aiohttp import web
 from dotenv import load_dotenv
-from fishaudio import FishAudio
+from fishaudio import AsyncFishAudio, FishAudio
 from groq import Groq
 
 ROOT = Path(__file__).resolve().parent
@@ -41,6 +41,11 @@ JST = timezone(timedelta(hours=9))
 
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 fish_client = FishAudio(api_key=os.getenv("FISH_API_KEY"))
+fish_async = AsyncFishAudio(api_key=os.getenv("FISH_API_KEY"))
+
+# 返事を作っている間に流す相づち（起動時に一度だけ音声を作って、使い回す）
+FILLER_TEXT = "はい！はい！ちょっと待ってくださいね。"
+filler_audio: dict = {}
 
 history: list[dict] = []
 usage = {"day": "", "tokens": 0}
@@ -126,14 +131,14 @@ async def chat(request: web.Request) -> web.Response:
     return web.json_response({"reply": reply})
 
 
-async def tts(request: web.Request) -> web.Response:
+async def tts(request: web.Request) -> web.StreamResponse:
+    # 音声は全部作り終わるのを待たず、できた部分から順に返す（再生を早く始めるため）
     data = await request.json()
     text = cut_at_sentence(str(data.get("text", "")).strip(), TTS_CHAR_LIMIT)
     if not text:
         return json_error("読み上げる文字がありません", 400)
     try:
-        audio = await asyncio.to_thread(
-            fish_client.tts.convert,
+        stream = await fish_async.tts.stream(
             text=text,
             reference_id=FISH_REFERENCE_ID,
             format="mp3",
@@ -141,7 +146,33 @@ async def tts(request: web.Request) -> web.Response:
         )
     except Exception as e:
         return json_error(f"音声の生成に失敗しました: {e}", 502)
-    return web.Response(body=audio, content_type="audio/mpeg")
+
+    response = web.StreamResponse(headers={"Content-Type": "audio/mpeg"})
+    await response.prepare(request)
+    async for chunk in stream:
+        await response.write(chunk)
+    await response.write_eof()
+    return response
+
+
+async def filler(request: web.Request) -> web.Response:
+    if not filler_audio.get("data"):
+        raise web.HTTPNotFound()
+    return web.Response(body=filler_audio["data"], content_type="audio/mpeg")
+
+
+async def load_filler(app: web.Application) -> None:
+    # 起動時に相づちの音声を作る（失敗しても、画面は相づちなしで動く）
+    try:
+        filler_audio["data"] = await asyncio.to_thread(
+            fish_client.tts.convert,
+            text=FILLER_TEXT,
+            reference_id=FISH_REFERENCE_ID,
+            format="mp3",
+            model=FISH_MODEL,
+        )
+    except Exception as e:
+        print(f"相づちの音声を作れませんでした: {e}")
 
 
 async def reset(request: web.Request) -> web.Response:
@@ -150,10 +181,12 @@ async def reset(request: web.Request) -> web.Response:
 
 
 app = web.Application(middlewares=[require_access_key])
+app.on_startup.append(load_filler)
 app.router.add_get("/", index)
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
 app.router.add_post("/api/tts", tts)
+app.router.add_get("/api/filler", filler)
 app.router.add_post("/api/reset", reset)
 
 if __name__ == "__main__":
