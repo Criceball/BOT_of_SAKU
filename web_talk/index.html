@@ -32,21 +32,22 @@
   #joinMsg { min-height: 1.2em; font-size: 0.9rem; color: #f0a0a0; text-align: center; margin: 0; }
 
   /* 画面 */
-  #room {
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    gap: 14px; padding: 16px; box-sizing: border-box;
-  }
-  #stage {
-    width: min(640px, 92vw); aspect-ratio: 4 / 3; background: #000; border-radius: 12px;
-    overflow: hidden; display: flex; align-items: center; justify-content: center;
-    position: relative;
-  }
+  #room { position: fixed; inset: 0; background: #000; }
+  /* 画面いっぱいに画像・動画を出す（操作パネルは下に重ねて、マウスを動かした時だけ出す） */
+  #stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
   /* 基本の画像を下に敷き、動画はその上に重ねる（動画が読み込み中・止まっている間は画像が見える） */
   #pic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   #vid { opacity: 0; transition: opacity 0.15s; }
   #vid.on { opacity: 1; }
-  #placeholder { position: absolute; opacity: 0.6; font-size: 1rem; }
-  #stage:fullscreen { width: 100vw; height: 100vh; border-radius: 0; }
+  #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 1rem; }
+
+  #ui {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 12px 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8) 35%);
+    max-height: 75vh; overflow-y: auto; transition: opacity 0.3s; box-sizing: border-box;
+  }
+  #ui.idle { opacity: 0; pointer-events: none; }
 
   #status { font-size: 0.9rem; opacity: 0.7; min-height: 1.2em; }
   #subtitle {
@@ -73,6 +74,7 @@
   }
   button:disabled { opacity: 0.5; cursor: default; }
   .secondary { background: #3a4450; }
+  .panel { background: rgba(20, 24, 30, 0.85); }
 </style>
 </head>
 <body>
@@ -93,11 +95,13 @@
     <video id="vid" playsinline loop muted></video>
     <div id="placeholder">画像を選んでください</div>
   </div>
+  <div id="ui">
   <div id="status"></div>
   <div id="subtitle"></div>
 
   <div class="row">
     <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
+    <button id="pip" class="secondary">映像を別窓に出す</button>
     <button id="fullscreen" class="secondary">全画面</button>
     <button id="talk">話し始める</button>
     <button id="stop" class="secondary">話すのをやめる</button>
@@ -121,6 +125,7 @@
     <input id="moodFile" type="file" accept="video/*" hidden>
     <ul id="moodList"></ul>
     <p class="hint">返事の文に言葉が入っていると、その動画を流します。どれも当てはまらなければ「話している時の動画」を流します。</p>
+  </div>
   </div>
 </section>
 
@@ -202,6 +207,41 @@
     } catch (_) { /* 保存がなくても動く */ }
   }
 
+  // ---- 映像だけを別の窓に出す（Discord では、この窓を共有する） ----
+  // 別窓は、Chrome の画面が隠れても描画が止まりにくい。操作は元の画面で行う。
+  let pipWin = null;
+  function openVideoWindow() {
+    if (!window.documentPictureInPicture) return Promise.resolve(false);
+    if (pipWin) return Promise.resolve(true);
+    // 注意：この関数の最初の await より前に requestWindow を呼ぶ（ボタンの操作の中で開くため）
+    return documentPictureInPicture.requestWindow({ width: 640, height: 360 }).then(win => {
+      pipWin = win;
+      // 見た目（CSS）を別窓にもコピーする
+      for (const sheet of document.styleSheets) {
+        try {
+          const style = pipWin.document.createElement('style');
+          style.textContent = [...sheet.cssRules].map(r => r.cssText).join('\n');
+          pipWin.document.head.append(style);
+        } catch (_) { /* 読めないCSSは飛ばす */ }
+      }
+      pipWin.document.body.style.cssText = 'margin:0;height:100vh;background:#000;overflow:hidden';
+      pipWin.document.body.append(stage);
+      // 別窓を閉じたら、映像を元の画面に戻す
+      pipWin.addEventListener('pagehide', closeVideoWindow);
+      statusEl.textContent = "映像は別の窓に出しています（Discord ではその窓を共有）";
+      return true;
+    }).catch(() => false);
+  }
+  function closeVideoWindow() {
+    if (!pipWin) return;
+    pipWin = null;
+    $('room').insertBefore(stage, $('room').firstChild);
+    statusEl.textContent = "映像を元の画面に戻しました";
+  }
+  $('pip').onclick = async () => {
+    if (!(await openVideoWindow())) statusEl.textContent = "この操作には Chrome 116 以降が必要です";
+  };
+
   // ---- 参加画面 ----
   $('key').addEventListener('input', () => {
     $('join-btn').disabled = !$('key').value.trim();
@@ -212,12 +252,30 @@
   $('join-btn').onclick = async () => {
     $('join-btn').disabled = true;
     $('joinMsg').textContent = '';
+    const pipReady = openVideoWindow();   // 操作の中で別窓を開く（後で開くと、ブラウザが止めることがある）
     await loadFiller();
     $('join').hidden = true;
     $('room').hidden = false;
     statusEl.textContent = "準備ができました";
     showIdle();
+    if (!(await pipReady)) {
+      statusEl.textContent = "別窓を開けませんでした（Chrome 116以降で使えます）。全画面で表示します";
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    }
+    showUi();
   };
+
+  // 操作パネルは、マウスやキーを動かした時だけ出す。入力中は消さない。
+  let hideTimer = null;
+  function showUi() {
+    $('ui').classList.remove('idle');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!$('ui').contains(document.activeElement)) $('ui').classList.add('idle');
+    }, 3000);
+  }
+  document.addEventListener('mousemove', showUi);
+  document.addEventListener('keydown', showUi);
 
   // ---- 画像（ブラウザの中だけで扱い、サーバーには送らない） ----
   $('file').addEventListener('change', e => {
@@ -312,9 +370,12 @@
     return hit ? hit.url : talkUrl;
   }
 
+  // 全画面の切り替え（ブラウザごと全画面にして、タブを消す）
   $('fullscreen').onclick = () => {
-    if (stage.requestFullscreen) stage.requestFullscreen();
-    else statusEl.textContent = "このブラウザは全画面に対応していません";
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen?.().catch(() => {
+      statusEl.textContent = "このブラウザは全画面に対応していません";
+    });
   };
 
   // ---- 音声認識：AIが話している間は止めて、自分の声を拾わないようにする ----
