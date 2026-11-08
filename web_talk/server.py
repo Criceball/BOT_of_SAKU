@@ -99,6 +99,11 @@ async def require_access_key(request: web.Request, handler):
     return await handler(request)
 
 
+async def healthz(request: web.Request) -> web.Response:
+    # Render がこのサーバーの生存を確かめるための応答（応答しなければ、Render が再起動する）
+    return web.json_response({"ok": True})
+
+
 async def index(request: web.Request) -> web.StreamResponse:
     return web.FileResponse(ROOT / "index.html")
 
@@ -208,6 +213,7 @@ async def reset(request: web.Request) -> web.Response:
 app = web.Application(middlewares=[require_access_key])
 app.on_startup.append(load_filler)
 app.router.add_get("/", index)
+app.router.add_get("/healthz", healthz)   # Render のヘルスチェック用（軽くて、鍵もいらない）
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
 app.router.add_post("/api/tts", tts)
