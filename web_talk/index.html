@@ -141,7 +141,62 @@
   let busy = false;       // 返事を待っている
   let fillerUrl = null;   // 相づちの音声
   let talkUrl = null;     // 話している時の動画
-  let moods = [];         // [{ kw, url, name }] 言葉ごとの動画
+  let moods = [];         // [{ kw, name, blob, url }] 言葉ごとの動画
+  let imageEntry = null;  // 選んだ画像 { blob, name }（保存用）
+  let talkEntry = null;   // 選んだ話している時の動画 { blob, name }（保存用）
+
+  // ---- 選んだ画像・動画をブラウザに保存する（IndexedDB。次に開いたときに戻す） ----
+  const DB_NAME = 'web-talk', STORE = 'files', KEY = 'state';
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function saveState() {
+    try {
+      const db = await openDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put({
+          image: imageEntry,
+          talk: talkEntry,
+          moods: moods.map(({ kw, name, blob }) => ({ kw, name, blob })),
+        }, KEY);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    } catch (_) {
+      statusEl.textContent = "このブラウザでは、選んだ画像・動画を保存できません";
+    }
+  }
+  async function restoreState() {
+    try {
+      const db = await openDb();
+      const saved = await new Promise((resolve, reject) => {
+        const req = db.transaction(STORE).objectStore(STORE).get(KEY);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      db.close();
+      if (!saved) return;
+      if (saved.image) {
+        imageEntry = saved.image;
+        pic.dataset.broken = '';
+        pic.src = URL.createObjectURL(saved.image.blob);
+      }
+      if (saved.talk) {
+        talkEntry = saved.talk;
+        talkUrl = URL.createObjectURL(saved.talk.blob);
+        $('talkName').textContent = saved.talk.name;
+      }
+      moods = (saved.moods || []).map(m => ({ ...m, url: URL.createObjectURL(m.blob) }));
+      renderMoods();
+    } catch (_) { /* 保存がなくても動く */ }
+  }
 
   // ---- 参加画面 ----
   $('key').addEventListener('input', () => {
@@ -166,6 +221,8 @@
     if (!f) return;
     pic.dataset.broken = '';
     pic.src = URL.createObjectURL(f);
+    imageEntry = { blob: f, name: f.name };
+    saveState();
   });
   pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
   pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
@@ -196,6 +253,8 @@
     if (talkUrl) URL.revokeObjectURL(talkUrl);
     talkUrl = URL.createObjectURL(f);
     $('talkName').textContent = f.name;
+    talkEntry = { blob: f, name: f.name };
+    saveState();
   });
   $('moodAdd').onclick = () => {
     const kw = $('moodKw').value.trim();
@@ -209,9 +268,11 @@
     const f = e.target.files[0];
     e.target.value = '';   // 同じファイルを続けて選べるように
     if (!f) return;
-    moods.push({ kw: $('moodKw').value.trim(), url: URL.createObjectURL(f), name: f.name });
+    const kw = $('moodKw').value.trim();
+    moods.push({ kw, name: f.name, blob: f, url: URL.createObjectURL(f) });
     $('moodKw').value = '';
     renderMoods();
+    saveState();
   });
   function renderMoods() {
     const list = $('moodList');
@@ -227,6 +288,7 @@
         URL.revokeObjectURL(m.url);
         moods.splice(i, 1);
         renderMoods();
+        saveState();
       };
       li.append(label, del);
       list.appendChild(li);
@@ -379,6 +441,7 @@
     await fetch('/api/reset', { method: 'POST', headers: authHeaders() });
     subtitle.textContent = '';
   };
+  restoreState();
 })();
 </script>
 </body>
