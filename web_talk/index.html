@@ -464,18 +464,24 @@
 
   // 文ごとの音声を、同時に作り始める（待ち時間を重ねて短くするため）
   function fetchSentence(text, signal) {
-    return post('/api/tts', { text }, signal)
+    const job = { ready: false, url: null, promise: null };
+    job.promise = post('/api/tts', { text }, signal)
       .then(async r => (r.ok ? URL.createObjectURL(await r.blob()) : null))
-      .catch(() => null);
+      .catch(() => null)
+      .then(url => { job.ready = true; job.url = url; return url; });
+    return job;
   }
 
-  // できた順に、一文ずつ再生する。文ごとに、流す動画を選び直す。
-  async function speakReply(text, fillerDone, myGen, signal) {
+  // できた順に、一文ずつ再生する。音声が間に合わないときは「はい！」で繋ぐ。
+  async function speakReply(text, myGen, signal) {
     const sentences = splitSentences(text);
     const jobs = sentences.map(sen => fetchSentence(sen, signal));
-    await fillerDone;
     for (let i = 0; i < jobs.length; i++) {
-      const url = await jobs[i];
+      const job = jobs[i];
+      const gap = job.ready ? null : playFiller();   // 間に合わないときだけ「はい！」
+      const url = await job.promise;
+      stopFiller();
+      if (gap) await gap;
       if (myGen !== gen) return;   // 止められた
       const video = pickVideo(sentences[i]);
       if (video) playVideo(video); else showIdle();
@@ -507,7 +513,7 @@
     speaking = true;   // 相づちと返事の間は、音声認識を止める
     stopRec();
     const myGen = ++gen;
-    showIdle();   // 待っている間は、話している時の動画を流さない
+    if (talkUrl) playVideo(talkUrl); else showIdle();   // 待っている間も、話している時の動画を流す
     abortCtl = new AbortController();
     const signal = abortCtl.signal;
     subtitle.textContent = `あなた：${text}`;
@@ -525,7 +531,7 @@
       }
       subtitle.textContent = `AI：${j.reply}`;
       statusEl.textContent = "話しています…";
-      await speakReply(j.reply, fillerDone, myGen, signal);
+      await speakReply(j.reply, myGen, signal);
     } catch (e) {
       if (myGen === gen) {
         subtitle.textContent = e.name === 'AbortError'
