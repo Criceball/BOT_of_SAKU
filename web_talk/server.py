@@ -4,9 +4,11 @@
 """
 
 import asyncio
+import atexit
 import hmac
 import logging
 import os
+import resource
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -205,8 +207,52 @@ async def reset(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+# ===== 診断用：プログラムが止まった理由を、ログに残す =====
+# 「終了の処理」が出ずに止まったら、強制終了（メモリ不足など）の可能性が高い。
+def _diag(message: str) -> None:
+    print(f"[診断] {message}", flush=True)
+
+
+def _on_exit() -> None:
+    _diag(f"プロセスが終了しました（pid={os.getpid()}）")
+
+
+atexit.register(_on_exit)
+
+
+def _on_loop_error(loop, context) -> None:
+    _diag(f"予期しないエラー: {context.get('message')} {context.get('exception')!r}")
+
+
+async def start_diagnostics(app: web.Application) -> None:
+    _diag(f"起動しました（pid={os.getpid()}）")
+    asyncio.get_running_loop().set_exception_handler(_on_loop_error)
+
+    async def memory_report() -> None:
+        # 5分ごとに、これまでのメモリの最大使用量（MB）を出す（Linux では KB 単位）
+        while True:
+            await asyncio.sleep(300)
+            mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            _diag(f"メモリの最大使用量: {mb:.0f}MB")
+
+    app["memory_report"] = asyncio.create_task(memory_report())
+
+
+async def stop_diagnostics(app: web.Application) -> None:
+    # SIGTERM（終了の依頼）や Ctrl+C で止まったとき、ここに来る
+    _diag("終了の処理を始めました（SIGTERM など）")
+
+
+class _SkipHealthzLog(logging.Filter):
+    # Render のヘルスチェック（/healthz）の記録は、ログを見やすくするため省く
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/healthz" not in record.getMessage()
+
+
 app = web.Application(middlewares=[require_access_key])
+app.on_startup.append(start_diagnostics)
 app.on_startup.append(load_filler)
+app.on_cleanup.append(stop_diagnostics)
 app.router.add_get("/", index)
 app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
@@ -221,4 +267,5 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     access_log = logging.getLogger("aiohttp.access")
     access_log.setLevel(logging.INFO)
+    access_log.addFilter(_SkipHealthzLog())
     web.run_app(app, host=host, port=PORT, access_log=access_log)
