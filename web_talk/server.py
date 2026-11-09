@@ -8,11 +8,13 @@ import atexit
 import hmac
 import logging
 import os
+import re
 import resource
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web
 from dotenv import load_dotenv
 from fishaudio import AsyncFishAudio, FishAudio
@@ -44,6 +46,8 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 PORT = int(os.getenv("PORT") or os.getenv("WEB_PORT", "8000"))
 # 誰でも使えないように、画面とAPIにアクセスキーを必須にする
 ACCESS_KEY = os.getenv("WEB_ACCESS_KEY", "")  # 空のときは、画面を無効にする（main.py が判断する）
+# アクセスキーが合ったとき、最初に読み込むパッケージ（Google ドライブの共有リンク。zip）
+PACKAGE_URL = os.getenv("PACKAGE_URL", "")
 
 MAX_REPLY_TOKENS = 2048
 HISTORY_LIMIT = 6  # 直近の発言を何件まで覚えるか
@@ -206,6 +210,47 @@ async def load_filler(app: web.Application) -> None:
     app["filler_task"] = asyncio.create_task(_make_filler())
 
 
+def drive_download_url(link: str) -> str:
+    # 共有リンク（/file/d/ID/view など）を、直接ダウンロードするリンクに変える
+    m = re.search(r"/d/([\w-]+)", link) or re.search(r"[?&]id=([\w-]+)", link)
+    if not m:
+        return link
+    return f"https://drive.google.com/uc?export=download&id={m.group(1)}"
+
+
+async def check(request: web.Request) -> web.Response:
+    # 画面の参加前に、アクセスキーが合っているかを確かめる（合わなければ、ミドルウェアが 401 を返す）
+    return web.json_response({"ok": True})
+
+
+async def package(request: web.Request) -> web.StreamResponse:
+    # Google ドライブの zip を、サーバー経由で渡す（ブラウザから直接取ると、Google が通信を止めるため）
+    if not PACKAGE_URL:
+        raise web.HTTPNotFound()
+    session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300))
+    try:
+        url = drive_download_url(PACKAGE_URL)
+        upstream = await session.get(url)
+        if "text/html" in upstream.headers.get("Content-Type", ""):
+            # 大きいファイルは、Google が確認の画面を出す。確認の印を付けて、もう一度取りに行く
+            page = await upstream.text()
+            upstream.release()
+            m = re.search(r"confirm=([0-9A-Za-z_-]+)", page)
+            upstream = await session.get(f"{url}&confirm={m.group(1) if m else 't'}")
+        if upstream.status != 200 or "text/html" in upstream.headers.get("Content-Type", ""):
+            upstream.release()
+            return json_error("Googleドライブからパッケージを取れませんでした（共有を「リンクを知っている全員」にしてください）", 502)
+        response = web.StreamResponse(headers={"Content-Type": "application/zip"})
+        await response.prepare(request)
+        async for chunk in upstream.content.iter_chunked(64 * 1024):
+            await response.write(chunk)
+        await response.write_eof()
+        upstream.release()
+        return response
+    finally:
+        await session.close()
+
+
 async def reset(request: web.Request) -> web.Response:
     history.clear()
     return web.json_response({"ok": True})
@@ -263,6 +308,8 @@ app.router.add_get("/avatar.png", avatar)
 app.router.add_post("/api/chat", chat)
 app.router.add_post("/api/tts", tts)
 app.router.add_get("/api/filler", filler)
+app.router.add_post("/api/check", check)
+app.router.add_get("/api/package", package)
 app.router.add_post("/api/reset", reset)
 
 if __name__ == "__main__":

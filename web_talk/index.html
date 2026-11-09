@@ -5,77 +5,104 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AIと話す</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Apple 風（ライト）。色は1つのアクセント（#0066cc）だけ。影は使わず、境界線と面の色で区切る */
+  :root {
+    color-scheme: light;
+    --ink: #1d1d1f; --ink-2: #333333; --muted: #7a7a7a;
+    --primary: #0066cc; --primary-hover: #0077ed; --focus: #0071e3;
+    --canvas: #ffffff; --parchment: #f5f5f7;
+    --hairline: #e0e0e0; --divider: #f0f0f0; --danger: #ff3b30;
+  }
+  * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body {
-    margin: 0; min-height: 100vh; background: #1b1f24; color: #eef2f5;
-    font-family: system-ui, "Yu Gothic", sans-serif; box-sizing: border-box;
+    margin: 0; min-height: 100vh; background: var(--parchment); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans",
+      "Hiragino Kaku Gothic ProN", "Yu Gothic", system-ui, sans-serif;
+    font-size: 17px; line-height: 1.47; letter-spacing: -0.022em;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* 参加画面（Zoomの参加画面のような、シンプルな配置） */
-  #join {
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-    justify-content: center; padding: 16px; box-sizing: border-box;
+  /* 参加画面：中央に白いカードを置く */
+  #join { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #join .card {
+    width: 100%; max-width: 400px; background: var(--canvas); border-radius: 18px;
+    padding: 36px 28px; display: flex; flex-direction: column; gap: 12px;
   }
-  #join .card { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
-  #join h1 { font-size: 1.4rem; text-align: center; margin: 0 0 12px; }
-  #join label { font-size: 0.95rem; opacity: 0.85; }
-  #join input {
-    padding: 12px; border-radius: 8px; border: 1px solid #556; background: #20262d;
-    color: #eef2f5; font-size: 1rem;
-  }
-  #join button {
-    padding: 12px; border-radius: 8px; border: 0; background: #4f8cff; color: #fff;
-    font-size: 1rem; cursor: pointer; margin-top: 8px;
-  }
-  #join button:disabled { background: #3a4450; color: #8a95a3; cursor: default; }
-  #joinMsg { min-height: 1.2em; font-size: 0.9rem; color: #f0a0a0; text-align: center; margin: 0; }
+  #join h1 { font-size: clamp(28px, 7vw, 40px); font-weight: 700; letter-spacing: -0.005em; line-height: 1.1; text-align: center; margin: 0 0 14px; }
+  #join label { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  #joinMsg { min-height: 1.3em; font-size: 14px; color: var(--danger); text-align: center; margin: 0; letter-spacing: 0; }
 
-  /* 画面 */
+  /* 画面：映像は黒い「舞台」、操作は白いすりガラスの帯 */
   #room { position: fixed; inset: 0; background: #000; }
-  /* 画面いっぱいに画像・動画を出す（操作パネルは下に重ねて、マウスを動かした時だけ出す） */
   #stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
-  /* 基本の画像を下に敷き、動画はその上に重ねる（動画が読み込み中・止まっている間は画像が見える） */
   #pic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   #vid { opacity: 0; transition: opacity 0.15s; }
   #vid.on { opacity: 1; }
-  #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 1rem; }
+  #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #f5f5f7; opacity: 0.6; font-size: 17px; }
+
+  /* 小窓（別窓が使えないスマホなどは、画面の中に小さく出す） */
+  #room.mini { background: var(--parchment); }
+  #room.mini #stage {
+    position: fixed; inset: auto; top: 16px; right: 16px; width: min(300px, 60vw); aspect-ratio: 16 / 9;
+    border-radius: 14px; border: 1px solid var(--hairline); z-index: 20;
+  }
 
   #ui {
-    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 12px 12px;
-    display: flex; flex-direction: column; align-items: center; gap: 10px;
-    background: linear-gradient(transparent, rgba(0, 0, 0, 0.8) 35%);
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px 18px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    background: rgba(255, 255, 255, 0.86);
+    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
+    border-top: 1px solid var(--hairline);
     max-height: 75vh; overflow-y: auto; transition: opacity 0.3s; box-sizing: border-box;
   }
   #ui.idle { opacity: 0; pointer-events: none; }
+  #room.mini #ui { background: var(--parchment); }
 
-  #status { font-size: 0.9rem; opacity: 0.7; min-height: 1.2em; }
-  #subtitle {
-    min-height: 3em; max-width: 640px; text-align: center; font-size: 1.1rem;
-    line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  #status { font-size: 14px; color: var(--muted); min-height: 1.3em; letter-spacing: 0; text-align: center; }
+  #subtitle { min-height: 3em; max-width: 680px; text-align: center; font-size: 17px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .row { display: flex; gap: 8px; width: 100%; max-width: 680px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  .row input[type=text], #join input {
+    border: 1px solid var(--hairline); background: var(--canvas); color: var(--ink);
+    font: inherit; font-size: 17px; letter-spacing: -0.022em; outline: none;
   }
-  .row { display: flex; gap: 8px; width: 100%; max-width: 640px; flex-wrap: wrap; justify-content: center; align-items: center; }
-  .row input[type=text] {
-    flex: 1; min-width: 140px; padding: 10px; border-radius: 8px;
-    border: 1px solid #556; background: #20262d; color: #eef2f5; font-size: 1rem;
-  }
+  .row input[type=text] { flex: 1; min-width: 150px; padding: 10px 18px; border-radius: 999px; }
+  #join input { padding: 12px 16px; border-radius: 12px; }
+  .row input[type=text]:focus, #join input:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+
   .panel {
-    width: 100%; max-width: 640px; border: 1px solid #333c47; border-radius: 10px;
-    padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;
+    width: 100%; max-width: 680px; background: var(--canvas); border: 1px solid var(--hairline);
+    border-radius: 18px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;
   }
-  .panel h2 { font-size: 0.95rem; margin: 0; opacity: 0.85; }
-  #moodList { list-style: none; margin: 0; padding: 0; font-size: 0.9rem; }
-  #moodList li { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
-  #moodList button { padding: 2px 10px; font-size: 0.85rem; }
-  .hint { font-size: 0.8rem; opacity: 0.6; margin: 0; }
+  .panel h2 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
+  #moodList { list-style: none; margin: 0; padding: 0; font-size: 15px; }
+  #moodList li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--divider); }
+  #moodList button { padding: 4px 14px; font-size: 14px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0; letter-spacing: 0; line-height: 1.5; }
+
+  /* ボタン：CTA は青い pill、それ以外は青い線の pill */
   button, .btn {
-    padding: 10px 16px; border-radius: 8px; border: 0; background: #4f8cff;
-    color: #fff; font-size: 1rem; cursor: pointer; display: inline-block;
+    font: inherit; font-size: 17px; letter-spacing: -0.022em; line-height: 1.2;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 11px 22px; border-radius: 999px; border: 1px solid var(--primary);
+    background: var(--primary); color: #fff; cursor: pointer; transition: background 0.15s, transform 0.12s;
   }
-  button:disabled { opacity: 0.5; cursor: default; }
-  .secondary { background: #3a4450; }
-  .panel { background: rgba(20, 24, 30, 0.85); }
-  /* 全画面のときは、操作パネルを出さない（Escで戻れます） */
+  button:hover, .btn:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  button:active, .btn:active { transform: scale(0.95); }
+  button:focus-visible, .btn:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); cursor: default; transform: none; }
+  .secondary { background: transparent; color: var(--primary); border-color: var(--primary); }
+  .secondary:hover { background: rgba(0, 102, 204, 0.06); border-color: var(--primary); }
+  .btn input { display: none; }
+  #join button { width: 100%; padding: 13px 22px; margin-top: 6px; }
+  #join button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); }
+
+  @media (max-width: 600px) {
+    body { font-size: 16px; }
+    #ui { padding: 12px 12px 16px; gap: 10px; }
+    .panel { padding: 14px; }
+  }
+  /* 全画面のときは、操作の帯を出さない（Escで戻れます） */
   html.fs #ui { display: none; }
 </style>
 </head>
@@ -87,7 +114,7 @@
     <label for="key">アクセスキー</label>
     <input id="key" type="password" autocomplete="off" placeholder="アクセスキーを入力">
     <button id="join-btn" disabled>参加</button>
-    <p id="joinMsg"></p>
+    <p id="joinMsg" role="alert"></p>
   </div>
 </section>
 
@@ -98,40 +125,41 @@
     <div id="placeholder">画像を選んでください</div>
   </div>
   <div id="ui">
-  <div id="status"></div>
-  <div id="subtitle"></div>
+    <div id="status"></div>
+    <div id="subtitle"></div>
 
-  <div class="row">
-    <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
-    <button id="pip" class="secondary">映像を別窓に出す</button>
-    <button id="fullscreen" class="secondary">全画面</button>
-    <button id="talk">話し始める</button>
-    <button id="stop" class="secondary">話すのをやめる</button>
-    <button id="reset" class="secondary">リセット</button>
-  </div>
-  <div class="row">
-    <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
-    <button id="send" class="secondary">送る</button>
-  </div>
+    <div class="row">
+      <label class="btn secondary">画像を選ぶ<input id="file" type="file" accept="image/*" hidden></label>
+      <button id="pip" class="secondary">小窓に出す</button>
+      <button id="fullscreen" class="secondary">全画面</button>
+      <button id="talk">話し始める</button>
+      <button id="stop" class="secondary">話すのをやめる</button>
+      <button id="reset" class="secondary">リセット</button>
+    </div>
+    <div class="row">
+      <input id="text" type="text" placeholder="文字で入力もできます" maxlength="200">
+      <button id="send">送る</button>
+    </div>
 
-  <div class="panel">
-    <h2>動画（ブラウザの中だけで使い、サーバーには送りません）</h2>
-    <div class="row">
-      <label class="btn secondary">話している時の動画を選ぶ<input id="talkFile" type="file" accept="video/*" hidden></label>
-      <span id="talkName" class="hint">未選択</span>
+    <div class="panel">
+      <h2>動画</h2>
+      <p class="hint">ブラウザの中だけで使い、サーバーには送りません。</p>
+      <div class="row">
+        <label class="btn secondary">話している時の動画を選ぶ<input id="talkFile" type="file" accept="video/*" hidden></label>
+        <span id="talkName" class="hint">未選択</span>
+      </div>
+      <div class="row">
+        <input id="moodKw" type="text" placeholder="言葉（例：うれしい）" maxlength="20">
+        <button id="moodAdd" class="secondary">動画を選んで追加</button>
+      </div>
+      <input id="moodFile" type="file" accept="video/*" hidden>
+      <div class="row">
+        <button id="pkgExport" class="secondary">パッケージを保存</button>
+        <label class="btn secondary">パッケージを読み込む<input id="pkgFile" type="file" accept=".zip" hidden></label>
+      </div>
+      <ul id="moodList"></ul>
+      <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
     </div>
-    <div class="row">
-      <input id="moodKw" type="text" placeholder="言葉（例：うれしい）" maxlength="20">
-      <button id="moodAdd" class="secondary">動画を選んで追加</button>
-    </div>
-    <input id="moodFile" type="file" accept="video/*" hidden>
-    <div class="row">
-      <button id="pkgExport" class="secondary">パッケージを保存</button>
-      <label class="btn secondary">パッケージを読み込む<input id="pkgFile" type="file" accept=".zip" hidden></label>
-    </div>
-    <ul id="moodList"></ul>
-    <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
-  </div>
   </div>
 </section>
 
@@ -223,6 +251,7 @@
     // 注意：この関数の最初の await より前に requestWindow を呼ぶ（ボタンの操作の中で開くため）
     return documentPictureInPicture.requestWindow({ width: 640, height: 360 }).then(win => {
       pipWin = win;
+      $('room').classList.remove('mini');
       // 見た目（CSS）を別窓にもコピーする
       for (const sheet of document.styleSheets) {
         try {
@@ -246,31 +275,49 @@
     statusEl.textContent = "映像を元の画面に戻しました";
     showUi();   // 操作パネル（全画面ボタンを含む）をもう一度見せる
   }
+  // 小窓：PC の Chrome は別の窓に出す（Discord で共有しやすい）。別窓が使えないスマホなどは、画面の中の小窓にする
+  function toggleMiniWindow() {
+    const on = !$('room').classList.contains('mini');
+    $('room').classList.toggle('mini', on);
+    $('pip').textContent = on ? '小窓を戻す' : '小窓に出す';
+    statusEl.textContent = on ? "映像を画面の中の小窓に出しています" : "映像を元の大きさに戻しました";
+  }
   $('pip').onclick = async () => {
-    if (!(await openVideoWindow())) statusEl.textContent = "この操作には Chrome 116 以降が必要です";
+    if (pipWin) { statusEl.textContent = "映像は別の窓に出しています"; return; }
+    if (window.documentPictureInPicture && await openVideoWindow()) return;
+    toggleMiniWindow();
   };
 
-  // ---- 参加画面 ----
+  // ---- 参加画面：アクセスキーが合っているかを、最初に確かめる ----
   $('key').addEventListener('input', () => {
     $('join-btn').disabled = !$('key').value.trim();
+    $('joinMsg').textContent = '';
   });
   $('key').addEventListener('keydown', e => {
     if (e.key === 'Enter' && !$('join-btn').disabled) $('join-btn').click();
   });
   $('join-btn').onclick = async () => {
     $('join-btn').disabled = true;
+    $('joinMsg').textContent = '確かめています…';
+    try {
+      const r = await fetch('/api/check', { method: 'POST', headers: authHeaders() });
+      if (!r.ok) {
+        $('joinMsg').textContent = r.status === 401 ? 'アクセスキーが違います' : '画面を開けませんでした（もう一度お試しください）';
+        $('join-btn').disabled = !$('key').value.trim();
+        return;
+      }
+    } catch (_) {
+      $('joinMsg').textContent = '通信できませんでした。もう一度お試しください';
+      $('join-btn').disabled = !$('key').value.trim();
+      return;
+    }
     $('joinMsg').textContent = '';
-    const pipReady = openVideoWindow();   // 操作の中で別窓を開く（後で開くと、ブラウザが止めることがある）
     await loadFiller();
     $('join').hidden = true;
     $('room').hidden = false;
-    statusEl.textContent = "準備ができました";
     showIdle();
-    if (!(await pipReady)) {
-      statusEl.textContent = "別窓を開けませんでした（Chrome 116以降で使えます）。全画面で表示します";
-      document.documentElement.requestFullscreen?.().catch(() => {});
-    }
     showUi();
+    await loadPackageFromServer();   // アクセスキーが合ったら、パッケージ（Google ドライブの zip）を最初に読み込む
   };
 
   // 操作パネルは、マウスやキーを動かした時だけ出す。入力中は消さない。
@@ -389,50 +436,63 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     statusEl.textContent = `パッケージを保存しました（言葉 ${moods.length} 件）`;
   };
+  // パッケージ（zip）を読み込み、画面に反映する。途中で失敗したら、今の内容はそのまま残す
+  async function applyPackage(file) {
+    if (typeof JSZip === 'undefined') throw new Error('パッケージの機能を読み込めませんでした（通信を確かめてください）');
+    const zip = await JSZip.loadAsync(file);
+    const manifest = JSON.parse(await zip.file('manifest.json').async('string'));
+    const load = async entry => {
+      const f = zip.file(entry.file);
+      if (!f) throw new Error(`中身がありません: ${entry.file}`);
+      return new Blob([await f.async('arraybuffer')], { type: guessType(entry.name) });
+    };
+    const talkBlob = manifest.talk ? await load(manifest.talk) : null;
+    const imageBlob = manifest.image ? await load(manifest.image) : null;
+    const moodBlobs = [];
+    for (const m of manifest.moods || []) moodBlobs.push({ kw: m.kw, name: m.name, blob: await load(m) });
+
+    moods.forEach(m => URL.revokeObjectURL(m.url));
+    moods = moodBlobs.map(m => ({ ...m, url: URL.createObjectURL(m.blob) }));
+    if (talkBlob) {
+      if (talkUrl) URL.revokeObjectURL(talkUrl);
+      talkUrl = URL.createObjectURL(talkBlob);
+      talkEntry = { blob: talkBlob, name: manifest.talk.name };
+      $('talkName').textContent = manifest.talk.name;
+    }
+    if (imageBlob) {
+      imageEntry = { blob: imageBlob, name: manifest.image.name };
+      pic.dataset.broken = '';
+      pic.src = URL.createObjectURL(imageBlob);
+    }
+    renderMoods();
+    saveState();
+    showIdle();
+    return moods.length;
+  }
   $('pkgFile').addEventListener('change', async e => {
     const f = e.target.files[0];
     e.target.value = '';   // 同じファイルを続けて選べるように
     if (!f) return;
-    if (typeof JSZip === 'undefined') {
-      statusEl.textContent = "パッケージの機能を読み込めませんでした（通信を確かめてください）";
-      return;
-    }
     try {
-      const zip = await JSZip.loadAsync(f);
-      const manifest = JSON.parse(await zip.file('manifest.json').async('string'));
-      const load = async (entry, mime) => {
-        const file = zip.file(entry.file);
-        if (!file) throw new Error(`中身がありません: ${entry.file}`);
-        return new Blob([await file.async('arraybuffer')], { type: guessType(entry.name) });
-      };
-      // 読み込んだものに入れ替える（前の動画はメモリから消す）
-      moods.forEach(m => URL.revokeObjectURL(m.url));
-      moods = [];
-      if (manifest.talk) {
-        const blob = await load(manifest.talk);
-        if (talkUrl) URL.revokeObjectURL(talkUrl);
-        talkUrl = URL.createObjectURL(blob);
-        talkEntry = { blob, name: manifest.talk.name };
-        $('talkName').textContent = manifest.talk.name;
-      }
-      if (manifest.image) {
-        const blob = await load(manifest.image);
-        imageEntry = { blob, name: manifest.image.name };
-        pic.dataset.broken = '';
-        pic.src = URL.createObjectURL(blob);
-      }
-      for (const m of manifest.moods || []) {
-        const blob = await load(m);
-        moods.push({ kw: m.kw, name: m.name, blob, url: URL.createObjectURL(blob) });
-      }
-      renderMoods();
-      saveState();
-      showIdle();
-      statusEl.textContent = `パッケージを読み込みました（言葉 ${moods.length} 件）`;
+      const n = await applyPackage(f);
+      statusEl.textContent = `パッケージを読み込みました（言葉 ${n} 件）`;
     } catch (err) {
       statusEl.textContent = `パッケージを読み込めませんでした（ファイルが違うかもしれません）`;
     }
   });
+  // アクセスキーが合ったあと、サーバーが持つ Google ドライブの zip を読み込む（既定）
+  async function loadPackageFromServer() {
+    statusEl.textContent = "パッケージを読み込んでいます…";
+    try {
+      const r = await fetch('/api/package', { headers: authHeaders() });
+      if (r.status === 404) { statusEl.textContent = "準備ができました（パッケージは設定されていません）"; return; }
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '読み込めませんでした');
+      const n = await applyPackage(await r.blob());
+      statusEl.textContent = `準備ができました（パッケージを読み込みました。言葉 ${n} 件）`;
+    } catch (err) {
+      statusEl.textContent = `準備ができました（パッケージを読み込めませんでした：${err.message}）`;
+    }
+  }
 
   function renderMoods() {
     const list = $('moodList');
