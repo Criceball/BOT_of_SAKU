@@ -379,6 +379,35 @@ async def usage_command(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
+# 使えるコマンドの一覧と使い方を表示する（/help）。本人にだけ見える。
+@bot.tree.command(name="help", description="コマンドの一覧と使い方を表示します")
+async def help_command(interaction: discord.Interaction):
+    lines = ["📖 コマンドの一覧"]
+    for cmd in sorted(bot.tree.get_commands(), key=lambda c: c.name):
+        lines.append(f"- `/{cmd.name}`：{cmd.description}")
+    lines += [
+        "",
+        "使い方の例",
+        f"- `/talk text:こんにちは`：AIに話しかけます（{TALK_INPUT_LIMIT}文字まで）。返事は文字と音声で届きます。",
+        "- `/usage`：今日の使用量と、あなたの残りの回数を見ます。",
+        "- `/model`：AIが使っているモデルを見ます。",
+        "- `/persona`：AIの性格を見る・変える・元に戻す（管理者だけ）。",
+        "",
+        "※ この一覧と結果は、あなただけに見えます。",
+    ]
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
+# 使っているモデルを表示する（/model）。本人にだけ見える。
+@bot.tree.command(name="model", description="AIが使っているモデルを表示します")
+async def model_command(interaction: discord.Interaction):
+    msg = (
+        "🤖 使っているモデル\n"
+        f"- 文章：`{GROQ_MODEL}`（Groq）\n"
+        f"- 音声：`{FISH_MODEL}`（Fish Audio）"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
+
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
     # PORT が設定されているときだけ、ヘルスチェック用の小さなサーバーを立てる。
