@@ -592,7 +592,7 @@ async def cheer_command(interaction: discord.Interaction):
     cheer_last_sent[interaction.channel_id] = now
     msg = random.choice(CHEER_MESSAGES)
     await interaction.response.send_message(
-        f"{interaction.user.display_name} さんから応援です！\n{msg}",
+        f"## {msg}",
         allowed_mentions=discord.AllowedMentions.none(),
     )
 
