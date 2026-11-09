@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
+import usage_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
     build_system_prompt,
@@ -187,6 +188,7 @@ async def chat(request: web.Request) -> web.Response:
 
     if completion.usage:
         add_usage(completion.usage.total_tokens)
+        await usage_store.add(today(), completion.usage.total_tokens)   # 再起動しても消えないように保存
     raw = sanitize_reply(completion.choices[0].message.content or "", web_persona())
     reply = strip_emotions(raw)
     history.append({"role": "assistant", "content": reply[:300]})
@@ -251,6 +253,9 @@ async def _make_filler() -> None:
 
 
 async def load_filler(app: web.Application) -> None:
+    # 再起動の後も、今日の使用量を続きから数えられるように、保存された値を読み直す
+    usage["day"] = today()
+    usage["tokens"] = (await usage_store.totals(today()))["tokens"]
     # 相づちの音声は、後ろで作る。終わるのを待つと、画面が開くまで時間がかかるため
     app["filler_task"] = asyncio.create_task(_make_filler())
 
