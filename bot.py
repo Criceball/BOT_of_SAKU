@@ -168,7 +168,7 @@ def cut_at_sentence(text: str, limit: int) -> str:
 
 @bot.event
 async def on_ready():
-    print(f"ログイン成功: {bot.user.name}")
+    print(f"ログイン成功ですよ〜: {bot.user.name}")
 
 
 @bot.event
@@ -202,19 +202,19 @@ def web_talk_message() -> str | None:
     key = os.getenv("WEB_ACCESS_KEY", "")
     if not url or not key:
         return None
-    return f"ウェブで話せます。\n{url}\nアクセスコード：||{key}||"
+    return f"ウェブで話せますよ〜\n{url}\nアクセスコード：||{key}||"
 
 
 async def send_web_talk_dm(message: discord.Message) -> None:
     text = web_talk_message()
     if text is None:
-        await message.reply("ウェブのリンクが設定されていません。")
+        await message.reply("ウェブのリンクが設定されていませんよ〜")
         return
     try:
         await message.author.send(text)
-        await message.reply("個人宛てにリンクをお送りしました。")
+        await message.reply("個人宛てにリンクをお送りしましたよ〜")
     except discord.Forbidden:
-        await message.reply("個人宛てに送れませんでした。このサーバーからのDMを許可してください。")
+        await message.reply("個人宛てに送れませんでした。このサーバーからのDMを許可してくださいね〜")
 
 
 def get_attachments(message: discord.Message) -> list[discord.Attachment]:
@@ -230,17 +230,17 @@ def get_attachments(message: discord.Message) -> list[discord.Attachment]:
 async def handle_conversion(message: discord.Message, attachment: discord.Attachment, text: str) -> None:
     src = normalize(os.path.splitext(attachment.filename)[1])
     if not src:
-        await message.reply("このファイル形式は変換に対応していません。")
+        await message.reply("このファイル形式は変換に対応していませんよ〜")
         return
 
     dst = detect_target(text, src)
     if dst is None:
         supported = ", ".join(sorted(FORMAT_ALIASES))
-        await message.reply(f"変換先の形式を指定してください（例: 「これをjpegにして」）。\n対応形式: {supported}")
+        await message.reply(f"変換先の形式を指定してくださいね〜（例: 「これをjpegにして」）。\n対応形式: {supported}")
         return
 
     if attachment.size > MAX_FILE_BYTES:
-        await message.reply("ファイルが大きすぎます（25MBまで）。")
+        await message.reply("ファイルが大きすぎますよ〜（25MBまで）。")
         return
 
     async with message.channel.typing():
@@ -251,16 +251,16 @@ async def handle_conversion(message: discord.Message, attachment: discord.Attach
             await message.reply(f"{e}")
             return
         except Exception as e:
-            await message.reply(f"変換に失敗しました: `{e}`")
+            await message.reply(f"変換に失敗しましたね〜: `{e}`")
             return
 
     if any(len(b) > MAX_FILE_BYTES for _, b in outputs):
-        await message.reply("変換後のファイルが大きすぎて送信できません。")
+        await message.reply("変換後のファイルが大きすぎて送信できませんよ〜")
         return
 
     files = [discord.File(io.BytesIO(b), filename=n) for n, b in outputs[:MAX_UPLOAD_FILES]]
     note = "（先頭ページのみ）" if src == "pdf" and dst != "txt" and len(outputs) == MAX_PDF_PAGES else ""
-    await message.reply(f"{src} → {dst} に変換しました。{note}", files=files)
+    await message.reply(f"{src} → {dst} に変換しましたよ〜{note}", files=files)
 
 
 async def handle_mention(message: discord.Message) -> None:
@@ -274,11 +274,11 @@ async def handle_mention(message: discord.Message) -> None:
         return
 
     if not text:
-        await message.reply("何かお話しかけてください。")
+        await message.reply("何かお話しかけてくださいね！")
         return
 
     if len(text) > MAX_CHAT_CHARS:
-        await message.reply(f"長すぎます（{MAX_CHAT_CHARS}文字までです）。")
+        await message.reply(f"長すぎますね〜（{MAX_CHAT_CHARS}文字までです）。")
         return
 
     if not budget_available():
@@ -309,9 +309,9 @@ async def handle_mention(message: discord.Message) -> None:
             refund_quota(quota_key)
             if "429" in str(e):
                 # 無料枠の上限（1分・1日）に当たった場合は、分かりやすく案内する
-                await message.reply("今は混み合っています。少し待ってから、もう一度話しかけてください。")
+                await message.reply("今は混み合っています。少し待ってから、もう一度話しかけてくださいね〜")
             else:
-                await message.reply(f"エラーが発生しました: `{e}`")
+                await message.reply(f"はい！はい！エラーが発生しました: `{e}`")
             return
 
     reply_text = strip_emotions(sanitize_reply(reply_text))
@@ -405,7 +405,7 @@ async def persona_command(
 
 
 # 今日の使用量を表示する（/usage）。結果は本人にだけ見える。
-@bot.tree.command(name="usage", description="今日のAIの使用量を表示します")
+@bot.tree.command(name="usage", description="今日のAIの使用量を表示しますよ〜")
 async def usage_command(interaction: discord.Interaction):
     today = datetime.now(JST).strftime("%Y-%m-%d")
     total = daily_tokens.get(today_jst(), 0)
@@ -451,25 +451,25 @@ def is_admin(interaction: discord.Interaction) -> bool:
     return interaction.guild is not None and interaction.user.guild_permissions.administrator
 
 
-ADMIN_ONLY_MESSAGE = "このコマンドはサーバーの管理者だけが使えます。"
+ADMIN_ONLY_MESSAGE = "このコマンドはサーバーの管理者だけが使えますよ〜"
 
 
 # このチャンネルの会話の履歴を消す（/reset）。結果は本人にだけ見える。
-@bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消します")
+@bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消しますよ〜")
 async def reset_command(interaction: discord.Interaction):
     chat_history[interaction.channel_id].clear()
     await interaction.response.send_message("このチャンネルの会話の履歴を消しました。", ephemeral=True)
 
 
 # 応答の速さを確かめる（/ping）
-@bot.tree.command(name="ping", description="ボットが動いているか、応答の速さを確かめます")
+@bot.tree.command(name="ping", description="ボットが動いているか、応答の速さを確かめますよ〜")
 async def ping_command(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
     await interaction.response.send_message(f"pong（応答 {ms}ms）", ephemeral=True)
 
 
 # 今日の利用状況（全体）を表示する（/stats。管理者だけ）
-@bot.tree.command(name="stats", description="今日の利用状況を表示します（管理者だけ）")
+@bot.tree.command(name="stats", description="今日の利用状況を表示しますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 async def stats_command(interaction: discord.Interaction):
     if not is_admin(interaction):
@@ -501,7 +501,7 @@ MOOD_CHOICES = [
 
 
 # 声の調子を決める（/mood。管理者だけ）
-@bot.tree.command(name="mood", description="AIの声の調子を決めます（管理者だけ）")
+@bot.tree.command(name="mood", description="AIの声の調子を決めますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(mood="声の調子")
 @discord.app_commands.choices(mood=MOOD_CHOICES)
@@ -523,7 +523,7 @@ VOICE_SPEED_CHOICES = [
 
 
 # 通常の声の速さを決める（/voice。管理者だけ。狂気モードの速さは変えません）
-@bot.tree.command(name="voice", description="AIの話す速さを決めます（管理者だけ）")
+@bot.tree.command(name="voice", description="AIの話す速さを決めますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(speed="話す速さ")
 @discord.app_commands.choices(speed=VOICE_SPEED_CHOICES)
@@ -537,7 +537,7 @@ async def voice_command(interaction: discord.Interaction, speed: discord.app_com
 
 
 # 狂気モードを強制的に切り替える（/crazy。管理者だけ）
-@bot.tree.command(name="crazy", description="狂気モードを強制的にON/OFFします（管理者だけ）")
+@bot.tree.command(name="crazy", description="狂気モードを強制的にON/OFFしますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(state="ON か OFF")
 @discord.app_commands.choices(state=[
@@ -555,25 +555,39 @@ async def crazy_command(interaction: discord.Interaction, state: discord.app_com
 
 
 CHEER_MESSAGES = [
-    "みんな、今日もがんばろう！応援してるよ",
-    "ここまで来たのは本当にすごいこと。自信を持って！",
-    "うまくいかない日があってもいい。明日また行こう！",
-    "小さな一歩も、ちゃんと前に進んでる。えらい！",
-    "一緒に過ごす時間を、楽しんでいこうね！",
-    "疲れたら休んでね。戻ってきたら、また応援するよ！",
+    "はい！はい！あなた達は努力家ですよ〜",
+    "はい！はい！開発には挫折はつきものです！挫折なくして真の開発とは呼べませんよ〜",
+    "はい！はい！自分の体力APIを超過しないようにパッチを貼ってくださいね〜！健康は最大の武器ですよ〜",
+    "はい！はい！何も出来なかったことは決して無価値ではないですよ〜",
+    "はい！はい！はい！はい！はい！はい！は〜い！",
+    "はい！はい！人生のcommit履歴は決してclearにできないので、一つ一つを大切にpushしていってくださいね〜",
+    "はい！はい！進捗しろ--force",
+    "いけるね！",
+    "はい！はい！努力は報われるまで努力してから、努力と名乗りましょうね〜",
+    "はい！はい！現実的に困難な壁に到達したときは敢えて初心に戻りましょうね〜！見落としたものは戻るまで気づけませんよ〜",
+    "最高にハイってやつだァ！！！！",
+    "​​深き夜に 祈りを載せて　デプロイす　エラーが出て　台パン　くそが",
+    "はい！はい！受験勉強と開発を両立するのが難しいなら開発を優先してくださいね〜",
+    "はい！はい！完璧主義は開発に置いて諸刃の刃ですよ〜！現実との折り合いをつけていきましょうね〜",
+    "胸を張ってください。君たちは私の誇りです。",
+    "はい！はい！私が世界一ですよ〜！あなた達は世界二ですね〜",
+    "はい！はい！ハッキングなんて最後は運！神様の気まぐれ！",
+    "はい！はい！開発お疲れ様でしたよ〜！明日も頑張りましょう！",
+    "はい！はい！今日も開発してて偉いですよ！継続は力になります！",
+    "はい！はい！勉強もゆくゆくは開発の力になりますからね〜！",
 ]
 CHEER_COOLDOWN_SECONDS = 30
 cheer_last_sent: dict[int, float] = {}
 
 
 # チャンネルのみんなに応援メッセージを送る（/cheer）。全員に見える。連続で送れないように間隔を空ける。
-@bot.tree.command(name="cheer", description="チャンネルのみんなに応援メッセージを送ります")
+@bot.tree.command(name="cheer", description="チャンネルのみんなに応援メッセージを送りますよ〜！")
 async def cheer_command(interaction: discord.Interaction):
     now = time.monotonic()
     last = cheer_last_sent.get(interaction.channel_id)
     if last is not None and now - last < CHEER_COOLDOWN_SECONDS:
         wait = int(CHEER_COOLDOWN_SECONDS - (now - last))
-        await interaction.response.send_message(f"少し待ってから送ってください（あと {wait} 秒）", ephemeral=True)
+        await interaction.response.send_message(f"少し待ってから送ってくださいね〜（あと {wait} 秒）", ephemeral=True)
         return
     cheer_last_sent[interaction.channel_id] = now
     msg = random.choice(CHEER_MESSAGES)
