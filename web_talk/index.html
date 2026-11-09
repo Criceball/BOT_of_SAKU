@@ -54,38 +54,43 @@
   }
 
   #ui {
-    flex: 0 0 auto; max-height: 52vh; overflow-y: auto; box-sizing: border-box;
-    display: flex; flex-direction: column; align-items: center; gap: 12px;
-    padding: 12px 16px 16px; background: var(--parchment);
+    flex: 0 1 auto; min-height: 0; max-height: 60vh; overflow: hidden; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 10px 14px 14px; background: var(--parchment);
   }
+  #ui > * { flex-shrink: 0; }
   #room.mini #ui { background: var(--parchment); }
 
-  #status { font-size: 14px; color: var(--muted); min-height: 1.3em; letter-spacing: 0; text-align: center; }
-  #subtitle { min-height: 3em; max-width: 680px; text-align: center; font-size: 17px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-  .row { display: flex; gap: 8px; width: 100%; max-width: 680px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  #status { font-size: 13px; color: var(--muted); min-height: 1.2em; letter-spacing: 0; text-align: center; }
+  /* 返事の文は、長くても専用の枠の中でスクロールする（下のボタンに被らない） */
+  #ui > #subtitle { flex: 0 1 auto; min-height: 2.6em; max-height: 24vh; overflow-y: auto; width: 100%; max-width: 680px; text-align: center; font-size: 16px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .row { display: flex; gap: 6px; width: 100%; max-width: 680px; flex-wrap: wrap; justify-content: center; align-items: center; }
   .row input[type=text], #join input {
     border: 1px solid var(--hairline); background: var(--canvas); color: var(--ink);
     font: inherit; font-size: 17px; letter-spacing: -0.022em; outline: none;
   }
-  .row input[type=text] { flex: 1; min-width: 150px; padding: 10px 18px; border-radius: 999px; }
+  .row input[type=text] { flex: 1; min-width: 130px; padding: 7px 14px; font-size: 15px; border-radius: 999px; }
   #join input { padding: 12px 16px; border-radius: 12px; }
   .row input[type=text]:focus, #join input:focus { outline: none; border-color: var(--muted); }
 
+  /* 動画などの設定は、折りたたんでおく（開いても、この枠の中でスクロールする） */
   .panel {
     width: 100%; max-width: 680px; background: var(--canvas); border: 1px solid var(--hairline);
-    border-radius: 18px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px;
+    border-radius: 14px; padding: 8px 14px; flex: 0 1 auto; min-height: 0; max-height: 32vh; overflow-y: auto;
   }
-  .panel h2 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.02em; }
+  .panel summary { cursor: pointer; font-size: 14px; font-weight: 600; letter-spacing: 0; list-style: none; padding: 2px 0; }
+  .panel summary::-webkit-details-marker { display: none; }
+  .panel-body { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
   #moodList { list-style: none; margin: 0; padding: 0; font-size: 15px; }
   #moodList li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--divider); }
-  #moodList button { padding: 4px 14px; font-size: 14px; }
+  #moodList button { padding: 3px 10px; font-size: 13px; }
   .hint { font-size: 13px; color: var(--muted); margin: 0; letter-spacing: 0; line-height: 1.5; }
 
   /* ボタン：CTA は青い pill、それ以外は青い線の pill */
   button, .btn {
-    font: inherit; font-size: 17px; letter-spacing: -0.022em; line-height: 1.2;
+    font: inherit; font-size: 14px; letter-spacing: 0; line-height: 1.2;
     display: inline-flex; align-items: center; justify-content: center;
-    padding: 11px 22px; border-radius: 999px; border: 1px solid var(--primary);
+    padding: 7px 14px; border-radius: 999px; border: 1px solid var(--primary);
     background: var(--primary); color: #fff; cursor: pointer; transition: background 0.15s, transform 0.12s;
   }
   button:hover, .btn:hover { opacity: 0.85; }
@@ -94,13 +99,12 @@
   button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); cursor: default; transform: none; }
   .secondary { background: transparent; color: var(--primary); border-color: var(--primary); }
   .btn input { display: none; }
-  #join button { width: 100%; padding: 13px 22px; margin-top: 6px; }
+  #join button { width: 100%; padding: 13px 22px; margin-top: 6px; font-size: 17px; }
   #join button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); }
 
   @media (max-width: 600px) {
     body { font-size: 16px; }
-    #ui { padding: 12px 12px 16px; gap: 10px; }
-    .panel { padding: 14px; }
+    #ui { padding: 8px 10px 12px; gap: 6px; }
   }
   /* 全画面のときは、操作の帯を出さない（Escで戻れます） */
   html.fs #ui { display: none; }
@@ -145,8 +149,9 @@
       <button id="send">送る</button>
     </div>
 
-    <div class="panel">
-      <h2>動画</h2>
+    <details class="panel">
+      <summary>動画・画像・パッケージの設定</summary>
+      <div class="panel-body">
       <p class="hint">ブラウザの中だけで使い、サーバーには送りません。</p>
       <div class="row">
         <label class="btn secondary">話している時の動画を選ぶ<input id="talkFile" type="file" accept="video/*" hidden></label>
@@ -167,7 +172,8 @@
       </div>
       <ul id="moodList"></ul>
       <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉の動画は、その言葉を読んでいる間（おおよその位置）に流れます。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
-    </div>
+      </div>
+    </details>
   </div>
 </section>
 
@@ -675,6 +681,98 @@
   }
 
   // できた順に、一文ずつ再生する。音声が間に合わないときは「はい！」で繋ぐ。
+  // ---- 言葉が読まれる時間の推定（音声を解析して、文字の重みと合わせる） ----
+  // 1. 音声から、しゃべっている区間と、句読点の位置の無音（間）を見つける
+  // 2. 文字ごとに「拍の数の目安」（重み）を決めて、時間に割り振る（かな1、漢字2 など）
+  // 3. 見つけた無音を句読点に合わせて目印にし、目印の間では重みの割合で時間を求める
+  const PAUSE_CHARS = '、，,。！？!?…．.';
+  const SMALL_KANA = 'ゃゅょぁぃぅぇぉャュョァィゥェォ';
+  function charWeight(ch) {
+    if (SMALL_KANA.includes(ch)) return 0;                 // 小さい「ゃゅょ」は前の文字と1拍
+    if (/[ぁ-ゖァ-ヺー]/.test(ch)) return 1;                // かな・長音は1拍
+    if (/[一-龥々]/.test(ch)) return 2;                     // 漢字は平均2拍
+    if (/[0-9０-９]/.test(ch)) return 2;
+    if (/[A-Za-zＡ-Ｚａ-ｚ]/.test(ch)) return 1.5;
+    if ('、，,'.includes(ch)) return 1.5;                   // 読点の間
+    if ('。！？!?…．.'.includes(ch)) return 2.5;            // 句点の間
+    return 0;                                               // 記号・空白
+  }
+  let audioCtx = null;
+  async function analyzeSpeech(url) {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await (await fetch(url)).arrayBuffer();
+    const audio = await audioCtx.decodeAudioData(buf);
+    const ch = audio.getChannelData(0);
+    const hop = Math.round(audio.sampleRate / 100);          // 10ミリ秒ごとの音量
+    const n = Math.floor(ch.length / hop);
+    const rms = new Float32Array(n);
+    let peak = 0;
+    for (let f = 0; f < n; f++) {
+      let sum = 0;
+      for (let k = f * hop; k < (f + 1) * hop; k++) sum += ch[k] * ch[k];
+      rms[f] = Math.sqrt(sum / hop);
+      if (rms[f] > peak) peak = rms[f];
+    }
+    if (peak <= 0) return null;
+    const thr = Math.max(peak * 0.06, 0.003);
+    let first = -1, last = -1;
+    for (let f = 0; f < n; f++) if (rms[f] > thr) { if (first < 0) first = f; last = f; }
+    if (first < 0) return null;
+    const pauses = [];                                       // 0.12秒以上の無音を「間」とみなす
+    let run = -1;
+    for (let f = first; f <= last; f++) {
+      if (rms[f] <= thr) { if (run < 0) run = f; }
+      else if (run >= 0) { if (f - run >= 12) pauses.push({ start: run / 100, end: f / 100 }); run = -1; }
+    }
+    return { start: first / 100, end: (last + 1) / 100, pauses };
+  }
+  const CUE_LEAD = 0.06;   // 動画の切り替えに時間がかかる分、少し早めに切り替える
+  function buildCues(sentence, emotion, info) {
+    const n = sentence.length;
+    const cum = new Float64Array(n + 1);                     // 文字ごとの重みの累計
+    for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + charWeight(sentence[i]);
+    const total = cum[n];
+    if (total <= 0) return [];
+    const span = info.end - info.start;
+    const prop = w => info.start + (w / total) * span;
+    // 見つけた無音を、いちばん近い句読点に合わせて、目印にする
+    let anchors = [[0, info.start]];
+    let from = 0;
+    for (const p of info.pauses) {
+      const mid = (p.start + p.end) / 2;
+      let best = -1, bestDiff = Infinity;
+      for (let i = from; i < n; i++) {
+        if (!PAUSE_CHARS.includes(sentence[i])) continue;
+        const diff = Math.abs(prop((cum[i] + cum[i + 1]) / 2) - mid);
+        if (diff < bestDiff) { bestDiff = diff; best = i; }
+      }
+      if (best >= 0 && bestDiff < 0.15 * span + 0.2) {
+        anchors.push([cum[best], p.start], [cum[best + 1], p.end]);
+        from = best + 1;
+      }
+    }
+    anchors.push([total, info.end]);
+    anchors = anchors.filter((a, k) => k === 0 || (a[0] >= anchors[k - 1][0] && a[1] >= anchors[k - 1][1]));
+    const timeAt = w => {
+      for (let k = 1; k < anchors.length; k++) {
+        const [w0, t0] = anchors[k - 1], [w1, t1] = anchors[k];
+        if (w <= w1) return w1 === w0 ? t1 : t0 + ((w - w0) / (w1 - w0)) * (t1 - t0);
+      }
+      return info.end;
+    };
+    const cues = [];
+    for (const m of moods) {
+      if (m.kw === '狂気' || m.kw === emotion) continue;
+      let idx = sentence.indexOf(m.kw);
+      while (idx >= 0) {
+        cues.push({ url: m.url, from: Math.max(0, timeAt(cum[idx]) - CUE_LEAD), to: timeAt(cum[idx + m.kw.length]) });
+        idx = sentence.indexOf(m.kw, idx + m.kw.length);
+      }
+    }
+    return cues;
+  }
+
+  // 解析が間に合わないとき用：文字の位置から、おおよその時間の割合を求める
   // 文の中で言葉が読まれる時間の範囲を、文字の位置から推定する（音声には時間情報がないため）。
   // 例：「これはりんごです」→「りんご」は、文の 3/8〜5/8 の時間に流す。
   function keywordCues(sentence, emotion) {
@@ -699,7 +797,8 @@
       if (myGen !== gen) return;   // 止められた
       // 基本の動画（感情・狂気・話している時の動画）。言葉の動画は、読まれている時間に合わせて重ねる
       const base = pickVideo(sentences[i].emotion, '');
-      const cues = keywordCues(sentences[i].text, sentences[i].emotion);
+      const cuesFrac = keywordCues(sentences[i].text, sentences[i].emotion);
+      let cueTimes = null;   // 音声の解析ができたら、秒で持つ（できるまでは割合で代用）
       let shown = base;
       const show = u => { if (u) playVideo(u); else showTalkBase(); };
       show(base);
@@ -707,15 +806,22 @@
         statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
         continue;
       }
-      // 再生の位置（音声の長さに対する割合）で、言葉の動画に切り替える
-      replyEl.ontimeupdate = () => {
+      if (cuesFrac.length) {
+        analyzeSpeech(url)
+          .then(info => { if (info) cueTimes = buildCues(sentences[i].text, sentences[i].emotion, info); })
+          .catch(() => {});
+      }
+      // 再生の位置を細かく見て（約0.03秒ごと）、言葉の動画に切り替える
+      const timer = setInterval(() => {
         const d = replyEl.duration;
         if (!isFinite(d) || d <= 0) return;
-        const t = replyEl.currentTime / d;
-        const hit = cues.find(c => t >= c.start && t < c.end);
+        const now = replyEl.currentTime;
+        let hit;
+        if (cueTimes) hit = cueTimes.find(c => now >= c.from && now < c.to);
+        else { const t = now / d; hit = cuesFrac.find(c => t >= c.start && t < c.end); }
         const want = hit ? hit.url : base;
         if (want !== shown) { shown = want; show(want); }
-      };
+      }, 30);
       await new Promise(resolve => {
         resolvePlay = resolve;
         replyEl.onended = resolve;
@@ -723,7 +829,7 @@
         replyEl.src = url;
         replyEl.play().catch(resolve);
       });
-      replyEl.ontimeupdate = null;
+      clearInterval(timer);
       resolvePlay = null;
       if (myGen !== gen) return;
     }
