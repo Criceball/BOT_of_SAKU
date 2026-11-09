@@ -14,6 +14,10 @@
     --hairline: #e0e0e0; --divider: #f0f0f0; --danger: #ff3b30;
   }
   * { box-sizing: border-box; }
+  /* 文字をコピーできないように、選択と青いハイライトを出さない（入力欄だけは使える） */
+  body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  ::selection { background: transparent; }
+  input { -webkit-user-select: text; user-select: text; }
   [hidden] { display: none !important; }
   body {
     margin: 0; min-height: 100vh; background: var(--parchment); color: var(--ink);
@@ -34,9 +38,10 @@
   #joinMsg { min-height: 1.3em; font-size: 14px; color: var(--danger); text-align: center; margin: 0; letter-spacing: 0; }
 
   /* 画面：映像は黒い「舞台」、操作は白いすりガラスの帯 */
-  #room { position: fixed; inset: 0; background: #000; }
-  #stage { position: absolute; inset: 0; background: #000; overflow: hidden; }
-  #pic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  #room { position: fixed; inset: 0; background: var(--parchment); display: flex; flex-direction: column; }
+  #stage { position: relative; flex: 1 1 auto; min-height: 36vh; margin: 12px 12px 0; border-radius: 18px; background: #000; overflow: hidden; }
+  #pic, #talkPic, #vid { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+  #talkPic[hidden] { display: none !important; }
   #vid { opacity: 0; transition: opacity 0.15s; }
   #vid.on { opacity: 1; }
   #placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #f5f5f7; opacity: 0.6; font-size: 17px; }
@@ -44,19 +49,15 @@
   /* 小窓（別窓が使えないスマホなどは、画面の中に小さく出す） */
   #room.mini { background: var(--parchment); }
   #room.mini #stage {
-    position: fixed; inset: auto; top: 16px; right: 16px; width: min(300px, 60vw); aspect-ratio: 16 / 9;
+    position: fixed; inset: auto; top: 16px; right: 16px; margin: 0; width: min(300px, 60vw); aspect-ratio: 16 / 9;
     border-radius: 14px; border: 1px solid var(--hairline); z-index: 20;
   }
 
   #ui {
-    position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 16px 18px;
+    flex: 0 0 auto; max-height: 52vh; overflow-y: auto; box-sizing: border-box;
     display: flex; flex-direction: column; align-items: center; gap: 12px;
-    background: rgba(255, 255, 255, 0.86);
-    -webkit-backdrop-filter: saturate(180%) blur(20px); backdrop-filter: saturate(180%) blur(20px);
-    border-top: 1px solid var(--hairline);
-    max-height: 75vh; overflow-y: auto; transition: opacity 0.3s; box-sizing: border-box;
+    padding: 12px 16px 16px; background: var(--parchment);
   }
-  #ui.idle { opacity: 0; pointer-events: none; }
   #room.mini #ui { background: var(--parchment); }
 
   #status { font-size: 14px; color: var(--muted); min-height: 1.3em; letter-spacing: 0; text-align: center; }
@@ -68,7 +69,7 @@
   }
   .row input[type=text] { flex: 1; min-width: 150px; padding: 10px 18px; border-radius: 999px; }
   #join input { padding: 12px 16px; border-radius: 12px; }
-  .row input[type=text]:focus, #join input:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+  .row input[type=text]:focus, #join input:focus { outline: none; border-color: var(--muted); }
 
   .panel {
     width: 100%; max-width: 680px; background: var(--canvas); border: 1px solid var(--hairline);
@@ -87,12 +88,11 @@
     padding: 11px 22px; border-radius: 999px; border: 1px solid var(--primary);
     background: var(--primary); color: #fff; cursor: pointer; transition: background 0.15s, transform 0.12s;
   }
-  button:hover, .btn:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  button:hover, .btn:hover { opacity: 0.85; }
   button:active, .btn:active { transform: scale(0.95); }
-  button:focus-visible, .btn:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button, .btn, label { outline: none; -webkit-tap-highlight-color: transparent; }
   button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); cursor: default; transform: none; }
   .secondary { background: transparent; color: var(--primary); border-color: var(--primary); }
-  .secondary:hover { background: rgba(0, 102, 204, 0.06); border-color: var(--primary); }
   .btn input { display: none; }
   #join button { width: 100%; padding: 13px 22px; margin-top: 6px; }
   #join button:disabled { background: var(--hairline); border-color: var(--hairline); color: var(--muted); }
@@ -104,6 +104,8 @@
   }
   /* 全画面のときは、操作の帯を出さない（Escで戻れます） */
   html.fs #ui { display: none; }
+  html.fs #room { background: #000; }
+  html.fs #stage { margin: 0; border-radius: 0; }
 </style>
 </head>
 <body>
@@ -121,6 +123,7 @@
 <section id="room" hidden>
   <div id="stage">
     <img id="pic" alt="" src="/avatar.png">
+    <img id="talkPic" alt="" hidden>
     <video id="vid" playsinline loop muted></video>
     <div id="placeholder">画像を選んでください</div>
   </div>
@@ -148,6 +151,10 @@
       <div class="row">
         <label class="btn secondary">話している時の動画を選ぶ<input id="talkFile" type="file" accept="video/*" hidden></label>
         <span id="talkName" class="hint">未選択</span>
+      </div>
+      <div class="row">
+        <label class="btn secondary">話している時の画像を選ぶ<input id="talkImgFile" type="file" accept="image/*" hidden></label>
+        <span id="talkImgName" class="hint">未選択</span>
       </div>
       <div class="row">
         <input id="moodKw" type="text" placeholder="言葉（例：うれしい）" maxlength="20">
@@ -190,6 +197,9 @@
   let moods = [];         // [{ kw, name, blob, url }] 言葉ごとの動画
   let imageEntry = null;  // 選んだ画像 { blob, name }（保存用）
   let talkEntry = null;   // 選んだ話している時の動画 { blob, name }（保存用）
+  let talkImgUrl = null;  // 話している時の画像
+  let talkImgEntry = null;// 話している時の画像 { blob, name }（保存用）
+  const talkPic = $('talkPic');
 
   // ---- 選んだ画像・動画をブラウザに保存する（IndexedDB。次に開いたときに戻す） ----
   const DB_NAME = 'web-talk', STORE = 'files', KEY = 'state';
@@ -209,6 +219,7 @@
         tx.objectStore(STORE).put({
           image: imageEntry,
           talk: talkEntry,
+          talkImage: talkImgEntry,
           moods: moods.map(({ kw, name, blob }) => ({ kw, name, blob })),
         }, KEY);
         tx.oncomplete = resolve;
@@ -234,6 +245,7 @@
         pic.dataset.broken = '';
         pic.src = URL.createObjectURL(saved.image.blob);
       }
+      if (saved.talkImage) setTalkImage(saved.talkImage.blob, saved.talkImage.name);
       if (saved.talk) {
         talkEntry = saved.talk;
         talkUrl = URL.createObjectURL(saved.talk.blob);
@@ -335,11 +347,7 @@
   // 操作パネルは、マウスやキーを動かした時だけ出す。入力中は消さない。
   let hideTimer = null;
   function showUi() {
-    $('ui').classList.remove('idle');
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => {
-      if (!$('ui').contains(document.activeElement)) $('ui').classList.add('idle');
-    }, 3000);
+    $('ui').classList.remove('idle');   // 操作は消さず、ずっと出しておく
   }
   document.addEventListener('fullscreenchange', () => {
     document.documentElement.classList.toggle('fs', !!document.fullscreenElement);
@@ -359,19 +367,27 @@
   pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
   pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
 
-  // 待機中の表示：基本の画像を出す（動画は隠す）。画像がなければ案内の文字
+  // 待機中の表示：基本の画像を出す（動画と話している時の画像は隠す）。画像がなければ案内の文字
   function showIdle() {
     vid.classList.remove('on');
     vid.pause();
+    talkPic.hidden = true;
     const hasPic = pic.getAttribute('src') && !pic.dataset.broken;
     pic.hidden = !hasPic;
     placeholder.hidden = !!hasPic;
   }
 
+  // 話している間の基本の画像：話している時の画像があれば、それを出す（基本の画像の代わり）
+  function showTalkBase() {
+    placeholder.hidden = true;
+    const hasTalkPic = !!talkPic.getAttribute('src');
+    talkPic.hidden = !hasTalkPic;
+    pic.hidden = hasTalkPic || !(pic.getAttribute('src') && !pic.dataset.broken);
+  }
+
   // 話している間の表示：動画を重ねる。読み込み中は、下の基本の画像が見えたままになる
   function playVideo(url) {
-    placeholder.hidden = true;
-    pic.hidden = !(pic.getAttribute('src') && !pic.dataset.broken);
+    showTalkBase();
     if (vid.dataset.url !== url) {
       vid.dataset.url = url;
       vid.src = url;
@@ -395,6 +411,21 @@
     $('talkName').textContent = f.name;
     talkEntry = { blob: f, name: f.name };
     saveState();
+  });
+  function setTalkImage(blob, name) {
+    if (talkImgUrl) URL.revokeObjectURL(talkImgUrl);
+    talkImgUrl = URL.createObjectURL(blob);
+    talkImgEntry = { blob, name };
+    talkPic.src = talkImgUrl;
+    $('talkImgName').textContent = name;
+  }
+  $('talkImgFile').addEventListener('change', e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    setTalkImage(f, f.name);
+    saveState();
+    if (speaking) showTalkBase();
   });
   $('moodAdd').onclick = () => {
     const kw = $('moodKw').value.trim();
@@ -435,6 +466,10 @@
       zip.file('image', imageEntry.blob);
       manifest.image = { name: imageEntry.name, file: 'image' };
     }
+    if (talkImgEntry) {
+      zip.file('talkImage', talkImgEntry.blob);
+      manifest.talkImage = { name: talkImgEntry.name, file: 'talkImage' };
+    }
     moods.forEach((m, i) => {
       zip.file(`mood${i}`, m.blob);
       manifest.moods.push({ kw: m.kw, name: m.name, file: `mood${i}` });
@@ -460,6 +495,7 @@
     };
     const talkBlob = manifest.talk ? await load(manifest.talk) : null;
     const imageBlob = manifest.image ? await load(manifest.image) : null;
+    const talkImgBlob = manifest.talkImage ? await load(manifest.talkImage) : null;
     const moodBlobs = [];
     for (const m of manifest.moods || []) moodBlobs.push({ kw: m.kw, name: m.name, blob: await load(m) });
 
@@ -471,6 +507,7 @@
       talkEntry = { blob: talkBlob, name: manifest.talk.name };
       $('talkName').textContent = manifest.talk.name;
     }
+    if (talkImgBlob) setTalkImage(talkImgBlob, manifest.talkImage.name);
     if (imageBlob) {
       imageEntry = { blob: imageBlob, name: manifest.image.name };
       pic.dataset.broken = '';
@@ -648,7 +685,7 @@
       if (gap) await gap;
       if (myGen !== gen) return;   // 止められた
       const video = pickVideo(sentences[i].emotion, sentences[i].text);
-      if (video) playVideo(video); else showIdle();
+      if (video) playVideo(video); else showTalkBase();
       if (!url) {
         statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
         continue;
@@ -677,7 +714,7 @@
     speaking = true;   // 相づちと返事の間は、音声認識を止める
     stopRec();
     const myGen = ++gen;
-    if (talkUrl) playVideo(talkUrl); else showIdle();   // 待っている間も、話している時の動画を流す
+    if (talkUrl) playVideo(talkUrl); else showTalkBase();   // 待っている間も、話している時の動画（か画像）を出す
     abortCtl = new AbortController();
     const signal = abortCtl.signal;
     subtitle.textContent = `あなた：${text}`;
