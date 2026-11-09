@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
+import knowledge
 import usage_store
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -304,7 +305,7 @@ async def handle_mention(message: discord.Message) -> None:
     async with message.channel.typing():
         try:
             reply_text, used_tokens = await generate_reply([
-                {"role": "system", "content": build_system_prompt()},
+                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(message.content))},
                 *history,
             ])
             await record_tokens(used_tokens, message.author.id)
@@ -350,7 +351,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
     try:
         # ① Groq APIでAIの返答テキストを生成
         raw_reply, used_tokens = await generate_reply([
-            {"role": "system", "content": build_system_prompt()},
+            {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
         ])
         await record_tokens(used_tokens, interaction.user.id)
