@@ -1,7 +1,9 @@
 import asyncio
 import io
 import os
+import random
 import re
+import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
@@ -136,15 +138,22 @@ async def generate_reply(messages: list[dict]) -> tuple[str, int]:
     return completion.choices[0].message.content, used
 
 
+# 管理者が /mood /voice /crazy で変える設定（再起動すると元に戻る）
+forced_emotion: str | None = None   # 声の調子（None は自動）
+voice_speed: float | None = None    # 通常の声の速さ（None は既定）
+force_crazy: bool = False           # 強制的に狂気モード
+
+
 async def synthesize_speech(text: str, crazy: bool = False) -> bytes:
     # 音声生成も同期APIのため、別スレッドで実行する。感情のタグを付けて声の調子を変える
+    speed = tts_speed(crazy) if crazy or voice_speed is None else voice_speed
     return await asyncio.to_thread(
         fish_client.tts.convert,
-        text=tts_prefix(crazy, None) + text,
+        text=tts_prefix(crazy, forced_emotion) + text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
         model=FISH_MODEL,
-        speed=tts_speed(crazy),
+        speed=speed,
     )
 
 
@@ -315,7 +324,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
 
         # 音声にする分は短くして、音声の料金を抑える
         audio_bytes = await synthesize_speech(
-            cut_at_sentence(reply_text, TALK_CHAR_LIMIT), crazy=is_crazy(text)
+            cut_at_sentence(reply_text, TALK_CHAR_LIMIT), crazy=force_crazy or is_crazy(text)
         )
         audio_file = discord.File(io.BytesIO(audio_bytes), filename="reply.mp3")
         await interaction.followup.send(
@@ -407,6 +416,142 @@ async def model_command(interaction: discord.Interaction):
         f"- 音声：`{FISH_MODEL}`（Fish Audio）"
     )
     await interaction.response.send_message(msg, ephemeral=True)
+
+def is_admin(interaction: discord.Interaction) -> bool:
+    return interaction.guild is not None and interaction.user.guild_permissions.administrator
+
+
+ADMIN_ONLY_MESSAGE = "❌ このコマンドはサーバーの管理者だけが使えます。"
+
+
+# このチャンネルの会話の履歴を消す（/reset）。結果は本人にだけ見える。
+@bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消します")
+async def reset_command(interaction: discord.Interaction):
+    chat_history[interaction.channel_id].clear()
+    await interaction.response.send_message("🧹 このチャンネルの会話の履歴を消しました。", ephemeral=True)
+
+
+# 応答の速さを確かめる（/ping）
+@bot.tree.command(name="ping", description="ボットが動いているか、応答の速さを確かめます")
+async def ping_command(interaction: discord.Interaction):
+    ms = round(bot.latency * 1000)
+    await interaction.response.send_message(f"🏓 pong（応答 {ms}ms）", ephemeral=True)
+
+
+# 今日の利用状況（全体）を表示する（/stats。管理者だけ）
+@bot.tree.command(name="stats", description="今日の利用状況を表示します（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+async def stats_command(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    total_tokens = daily_tokens.get(today_jst(), 0)
+    requests = sum(n for (_, day), n in daily_usage.items() if day == today)
+    users = len({uid for (uid, day), n in daily_usage.items() if day == today and n > 0})
+    channels = sum(1 for history in chat_history.values() if history)
+    msg = (
+        "📊 今日の利用状況（全体）\n"
+        f"- トークン：{total_tokens:,} / {DAILY_TOKEN_BUDGET:,}\n"
+        f"- 回数：{requests}回（{users}人）\n"
+        f"- 会話中のチャンネル：{channels}\n"
+        f"- 声の調子：{forced_emotion or '自動'} ／ 速さ：{voice_speed or '既定'} ／ 狂気モード：{'ON' if force_crazy else 'OFF'}"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+MOOD_CHOICES = [
+    discord.app_commands.Choice(name="自動（タグなし）", value="auto"),
+    discord.app_commands.Choice(name="喜び", value="happy"),
+    discord.app_commands.Choice(name="悲しみ", value="sad"),
+    discord.app_commands.Choice(name="怒り", value="angry"),
+    discord.app_commands.Choice(name="興奮", value="excited"),
+    discord.app_commands.Choice(name="落ち着き", value="calm"),
+]
+
+
+# 声の調子を決める（/mood。管理者だけ）
+@bot.tree.command(name="mood", description="AIの声の調子を決めます（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.describe(mood="声の調子")
+@discord.app_commands.choices(mood=MOOD_CHOICES)
+async def mood_command(interaction: discord.Interaction, mood: discord.app_commands.Choice[str]):
+    global forced_emotion
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    forced_emotion = None if mood.value == "auto" else mood.value
+    await interaction.response.send_message(f"🎭 声の調子を「{mood.name}」にしました。", ephemeral=True)
+
+
+VOICE_SPEED_CHOICES = [
+    discord.app_commands.Choice(name="ゆっくり（0.8倍）", value=0.8),
+    discord.app_commands.Choice(name="普通（1.0倍）", value=1.0),
+    discord.app_commands.Choice(name="速め（1.2倍）", value=1.2),
+    discord.app_commands.Choice(name="かなり速め（1.4倍）", value=1.4),
+]
+
+
+# 通常の声の速さを決める（/voice。管理者だけ。狂気モードの速さは変えません）
+@bot.tree.command(name="voice", description="AIの話す速さを決めます（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.describe(speed="話す速さ")
+@discord.app_commands.choices(speed=VOICE_SPEED_CHOICES)
+async def voice_command(interaction: discord.Interaction, speed: discord.app_commands.Choice[float]):
+    global voice_speed
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    voice_speed = speed.value
+    await interaction.response.send_message(f"🎙️ 話す速さを「{speed.name}」にしました。", ephemeral=True)
+
+
+# 狂気モードを強制的に切り替える（/crazy。管理者だけ）
+@bot.tree.command(name="crazy", description="狂気モードを強制的にON/OFFします（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.describe(state="ON か OFF")
+@discord.app_commands.choices(state=[
+    discord.app_commands.Choice(name="ON", value="on"),
+    discord.app_commands.Choice(name="OFF", value="off"),
+])
+async def crazy_command(interaction: discord.Interaction, state: discord.app_commands.Choice[str]):
+    global force_crazy
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    force_crazy = state.value == "on"
+    msg = "😈 狂気モードを強制的にONにしました。" if force_crazy else "🙂 狂気モードをOFFにしました。"
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+CHEER_MESSAGES = [
+    "みんな、今日もがんばろう！応援してるよ📣",
+    "ここまで来たのは本当にすごいこと。自信を持って！",
+    "うまくいかない日があってもいい。明日また行こう！",
+    "小さな一歩も、ちゃんと前に進んでる。えらい！",
+    "一緒に過ごす時間を、楽しんでいこうね！",
+    "疲れたら休んでね。戻ってきたら、また応援するよ！",
+]
+CHEER_COOLDOWN_SECONDS = 30
+cheer_last_sent: dict[int, float] = {}
+
+
+# チャンネルのみんなに応援メッセージを送る（/cheer）。全員に見える。連続で送れないように間隔を空ける。
+@bot.tree.command(name="cheer", description="チャンネルのみんなに応援メッセージを送ります")
+async def cheer_command(interaction: discord.Interaction):
+    now = time.monotonic()
+    last = cheer_last_sent.get(interaction.channel_id)
+    if last is not None and now - last < CHEER_COOLDOWN_SECONDS:
+        wait = int(CHEER_COOLDOWN_SECONDS - (now - last))
+        await interaction.response.send_message(f"⏳ 少し待ってから送ってください（あと {wait} 秒）", ephemeral=True)
+        return
+    cheer_last_sent[interaction.channel_id] = now
+    msg = random.choice(CHEER_MESSAGES)
+    await interaction.response.send_message(
+        f"📣 {interaction.user.display_name} さんから応援です！\n{msg}",
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
 
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
