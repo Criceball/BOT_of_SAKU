@@ -166,7 +166,7 @@
         <label class="btn secondary">パッケージを読み込む<input id="pkgFile" type="file" accept=".zip" hidden></label>
       </div>
       <ul id="moodList"></ul>
-      <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
+      <p class="hint">返事の文に言葉が入っている、または [happy] などの感情のタグが付いていると、その動画を流します（言葉に happy などと入れるとタグで切り替わります）。言葉の動画は、その言葉を読んでいる間（おおよその位置）に流れます。言葉に「狂気」と入れた動画は、狂気時の返事で、ほかの言葉に反応しなかった文に流れます。どれも当てはまらなければ「話している時の動画」を流します。</p>
     </div>
   </div>
 </section>
@@ -675,6 +675,19 @@
   }
 
   // できた順に、一文ずつ再生する。音声が間に合わないときは「はい！」で繋ぐ。
+  // 文の中で言葉が読まれる時間の範囲を、文字の位置から推定する（音声には時間情報がないため）。
+  // 例：「これはりんごです」→「りんご」は、文の 3/8〜5/8 の時間に流す。
+  function keywordCues(sentence, emotion) {
+    const cues = [];
+    const len = sentence.length || 1;
+    for (const m of moods) {
+      if (m.kw === '狂気' || m.kw === emotion) continue;
+      const idx = sentence.indexOf(m.kw);
+      if (idx < 0) continue;
+      cues.push({ url: m.url, start: idx / len, end: (idx + m.kw.length) / len });
+    }
+    return cues;
+  }
   async function speakReply(sentences, myGen, signal) {
     const jobs = sentences.map(s => fetchSentence(s.text, signal, s.emotion));
     for (let i = 0; i < jobs.length; i++) {
@@ -684,12 +697,25 @@
       stopFiller();
       if (gap) await gap;
       if (myGen !== gen) return;   // 止められた
-      const video = pickVideo(sentences[i].emotion, sentences[i].text);
-      if (video) playVideo(video); else showTalkBase();
+      // 基本の動画（感情・狂気・話している時の動画）。言葉の動画は、読まれている時間に合わせて重ねる
+      const base = pickVideo(sentences[i].emotion, '');
+      const cues = keywordCues(sentences[i].text, sentences[i].emotion);
+      let shown = base;
+      const show = u => { if (u) playVideo(u); else showTalkBase(); };
+      show(base);
       if (!url) {
         statusEl.textContent = "音声は出せませんでした（文字だけ表示しています）";
         continue;
       }
+      // 再生の位置（音声の長さに対する割合）で、言葉の動画に切り替える
+      replyEl.ontimeupdate = () => {
+        const d = replyEl.duration;
+        if (!isFinite(d) || d <= 0) return;
+        const t = replyEl.currentTime / d;
+        const hit = cues.find(c => t >= c.start && t < c.end);
+        const want = hit ? hit.url : base;
+        if (want !== shown) { shown = want; show(want); }
+      };
       await new Promise(resolve => {
         resolvePlay = resolve;
         replyEl.onended = resolve;
@@ -697,6 +723,7 @@
         replyEl.src = url;
         replyEl.play().catch(resolve);
       });
+      replyEl.ontimeupdate = null;
       resolvePlay = null;
       if (myGen !== gen) return;
     }
