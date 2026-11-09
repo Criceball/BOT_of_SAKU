@@ -68,7 +68,7 @@ MAX_UPLOAD_FILES = 10
 # 1人1日の会話回数（メンションの会話と /talk の合計）。日付は日本時間で切り替える
 DAILY_LIMIT_PER_USER = 20
 JST = timezone(timedelta(hours=9))
-QUOTA_MESSAGE = f"⚠️ 今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
+QUOTA_MESSAGE = f"今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -168,13 +168,18 @@ def cut_at_sentence(text: str, limit: int) -> str:
 
 @bot.event
 async def on_ready():
-    print(f"✅ ログイン成功: {bot.user.name}")
+    print(f"ログイン成功: {bot.user.name}")
 
 
 @bot.event
 async def on_message(message: discord.Message):
     # ボット自身や他のボットの発言には反応しない
     if message.author.bot:
+        return
+
+    # 「ウェブで話そう」と送られたら、リンクとアクセスコードを個人宛てに送る
+    if WEB_TALK_TRIGGER in message.content:
+        await send_web_talk_dm(message)
         return
 
     # コマンド（!join など）以外で、ボットがメンションされたら会話する
@@ -185,6 +190,31 @@ async def on_message(message: discord.Message):
         await handle_mention(message)
 
     await bot.process_commands(message)
+
+
+# ウェブで話す画面の案内（リンクとアクセスコード）。コードは || で囲み、Discord で隠す
+WEB_TALK_TRIGGER = "ウェブで話そう"
+
+
+def web_talk_message() -> str | None:
+    # リンクは WEB_TALK_URL、なければ Render が自動で入れる RENDER_EXTERNAL_URL を使う
+    url = os.getenv("WEB_TALK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")
+    key = os.getenv("WEB_ACCESS_KEY", "")
+    if not url or not key:
+        return None
+    return f"ウェブで話せます。\n{url}\nアクセスコード：||{key}||"
+
+
+async def send_web_talk_dm(message: discord.Message) -> None:
+    text = web_talk_message()
+    if text is None:
+        await message.reply("ウェブのリンクが設定されていません。")
+        return
+    try:
+        await message.author.send(text)
+        await message.reply("個人宛てにリンクをお送りしました。")
+    except discord.Forbidden:
+        await message.reply("個人宛てに送れませんでした。このサーバーからのDMを許可してください。")
 
 
 def get_attachments(message: discord.Message) -> list[discord.Attachment]:
@@ -200,7 +230,7 @@ def get_attachments(message: discord.Message) -> list[discord.Attachment]:
 async def handle_conversion(message: discord.Message, attachment: discord.Attachment, text: str) -> None:
     src = normalize(os.path.splitext(attachment.filename)[1])
     if not src:
-        await message.reply("❌ このファイル形式は変換に対応していません。")
+        await message.reply("このファイル形式は変換に対応していません。")
         return
 
     dst = detect_target(text, src)
@@ -210,7 +240,7 @@ async def handle_conversion(message: discord.Message, attachment: discord.Attach
         return
 
     if attachment.size > MAX_FILE_BYTES:
-        await message.reply("❌ ファイルが大きすぎます（25MBまで）。")
+        await message.reply("ファイルが大きすぎます（25MBまで）。")
         return
 
     async with message.channel.typing():
@@ -218,19 +248,19 @@ async def handle_conversion(message: discord.Message, attachment: discord.Attach
             data = await attachment.read()
             outputs = await asyncio.to_thread(convert_file, data, src, dst)
         except UnsupportedConversion as e:
-            await message.reply(f"❌ {e}")
+            await message.reply(f"{e}")
             return
         except Exception as e:
-            await message.reply(f"⚠️ 変換に失敗しました: `{e}`")
+            await message.reply(f"変換に失敗しました: `{e}`")
             return
 
     if any(len(b) > MAX_FILE_BYTES for _, b in outputs):
-        await message.reply("❌ 変換後のファイルが大きすぎて送信できません。")
+        await message.reply("変換後のファイルが大きすぎて送信できません。")
         return
 
     files = [discord.File(io.BytesIO(b), filename=n) for n, b in outputs[:MAX_UPLOAD_FILES]]
     note = "（先頭ページのみ）" if src == "pdf" and dst != "txt" and len(outputs) == MAX_PDF_PAGES else ""
-    await message.reply(f"✅ {src} → {dst} に変換しました。{note}", files=files)
+    await message.reply(f"{src} → {dst} に変換しました。{note}", files=files)
 
 
 async def handle_mention(message: discord.Message) -> None:
@@ -248,7 +278,7 @@ async def handle_mention(message: discord.Message) -> None:
         return
 
     if len(text) > MAX_CHAT_CHARS:
-        await message.reply(f"⚠️ 長すぎます（{MAX_CHAT_CHARS}文字までです）。")
+        await message.reply(f"長すぎます（{MAX_CHAT_CHARS}文字までです）。")
         return
 
     if not budget_available():
@@ -279,9 +309,9 @@ async def handle_mention(message: discord.Message) -> None:
             refund_quota(quota_key)
             if "429" in str(e):
                 # 無料枠の上限（1分・1日）に当たった場合は、分かりやすく案内する
-                await message.reply("⚠️ 今は混み合っています。少し待ってから、もう一度話しかけてください。")
+                await message.reply("今は混み合っています。少し待ってから、もう一度話しかけてください。")
             else:
-                await message.reply(f"⚠️ エラーが発生しました: `{e}`")
+                await message.reply(f"エラーが発生しました: `{e}`")
             return
 
     reply_text = strip_emotions(sanitize_reply(reply_text))
@@ -302,7 +332,7 @@ TALK_INPUT_LIMIT = 300
 @discord.app_commands.describe(text="話しかける内容")
 async def talk_command(interaction: discord.Interaction, text: str):
     if len(text) > TALK_INPUT_LIMIT:
-        await interaction.response.send_message(f"❌ {TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
+        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
         return
     if not budget_available():
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
@@ -334,7 +364,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
         )
     except Exception as e:
         refund_quota(quota_key)
-        await interaction.followup.send(f"⚠️ エラーが発生しました: `{e}`", ephemeral=True)
+        await interaction.followup.send(f"エラーが発生しました: `{e}`", ephemeral=True)
 
 
 PERSONA_MAX_CHARS = 1000
@@ -355,22 +385,22 @@ async def persona_command(
     text: str = "",
 ):
     if interaction.guild is None or not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ このコマンドはサーバーの管理者だけが使えます。", ephemeral=True)
+        await interaction.response.send_message("このコマンドはサーバーの管理者だけが使えます。", ephemeral=True)
         return
 
     if action.value == "show":
         msg = f"現在の性格:\n```\n{current_persona()[:1500]}\n```"
     elif action.value == "set":
         if not text.strip():
-            msg = "❌ 変更するには text に性格の文章を入れてください。"
+            msg = "変更するには text に性格の文章を入れてください。"
         elif len(text) > PERSONA_MAX_CHARS:
-            msg = f"❌ 長すぎます（{PERSONA_MAX_CHARS}文字までです）。"
+            msg = f"長すぎます（{PERSONA_MAX_CHARS}文字までです）。"
         else:
             set_persona(text)
-            msg = "✅ 性格を変えました。再起動すると元に戻ります。"
+            msg = "性格を変えました。再起動すると元に戻ります。"
     else:
         reset_persona()
-        msg = "✅ 元の性格に戻しました。"
+        msg = "元の性格に戻しました。"
     await interaction.response.send_message(msg, ephemeral=True)
 
 
@@ -381,7 +411,7 @@ async def usage_command(interaction: discord.Interaction):
     total = daily_tokens.get(today_jst(), 0)
     mine = daily_usage.get((interaction.user.id, today), 0)
     msg = (
-        "📊 今日の使用量\n"
+        "今日の使用量\n"
         f"- 全体のトークン：{total:,} / {DAILY_TOKEN_BUDGET:,}\n"
         f"- あなたの回数：{mine} / {DAILY_LIMIT_PER_USER}"
     )
@@ -391,7 +421,7 @@ async def usage_command(interaction: discord.Interaction):
 # 使えるコマンドの一覧と使い方を表示する（/help）。本人にだけ見える。
 @bot.tree.command(name="help", description="コマンドの一覧と使い方を表示します")
 async def help_command(interaction: discord.Interaction):
-    lines = ["📖 コマンドの一覧"]
+    lines = ["コマンドの一覧"]
     for cmd in sorted(bot.tree.get_commands(), key=lambda c: c.name):
         lines.append(f"- `/{cmd.name}`：{cmd.description}")
     lines += [
@@ -411,7 +441,7 @@ async def help_command(interaction: discord.Interaction):
 @bot.tree.command(name="model", description="AIが使っているモデルを表示します")
 async def model_command(interaction: discord.Interaction):
     msg = (
-        "🤖 使っているモデル\n"
+        "使っているモデル\n"
         f"- 文章：`{GROQ_MODEL}`（Groq）\n"
         f"- 音声：`{FISH_MODEL}`（Fish Audio）"
     )
@@ -421,21 +451,21 @@ def is_admin(interaction: discord.Interaction) -> bool:
     return interaction.guild is not None and interaction.user.guild_permissions.administrator
 
 
-ADMIN_ONLY_MESSAGE = "❌ このコマンドはサーバーの管理者だけが使えます。"
+ADMIN_ONLY_MESSAGE = "このコマンドはサーバーの管理者だけが使えます。"
 
 
 # このチャンネルの会話の履歴を消す（/reset）。結果は本人にだけ見える。
 @bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消します")
 async def reset_command(interaction: discord.Interaction):
     chat_history[interaction.channel_id].clear()
-    await interaction.response.send_message("🧹 このチャンネルの会話の履歴を消しました。", ephemeral=True)
+    await interaction.response.send_message("このチャンネルの会話の履歴を消しました。", ephemeral=True)
 
 
 # 応答の速さを確かめる（/ping）
 @bot.tree.command(name="ping", description="ボットが動いているか、応答の速さを確かめます")
 async def ping_command(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    await interaction.response.send_message(f"🏓 pong（応答 {ms}ms）", ephemeral=True)
+    await interaction.response.send_message(f"pong（応答 {ms}ms）", ephemeral=True)
 
 
 # 今日の利用状況（全体）を表示する（/stats。管理者だけ）
@@ -451,7 +481,7 @@ async def stats_command(interaction: discord.Interaction):
     users = len({uid for (uid, day), n in daily_usage.items() if day == today and n > 0})
     channels = sum(1 for history in chat_history.values() if history)
     msg = (
-        "📊 今日の利用状況（全体）\n"
+        "今日の利用状況（全体）\n"
         f"- トークン：{total_tokens:,} / {DAILY_TOKEN_BUDGET:,}\n"
         f"- 回数：{requests}回（{users}人）\n"
         f"- 会話中のチャンネル：{channels}\n"
@@ -481,7 +511,7 @@ async def mood_command(interaction: discord.Interaction, mood: discord.app_comma
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     forced_emotion = None if mood.value == "auto" else mood.value
-    await interaction.response.send_message(f"🎭 声の調子を「{mood.name}」にしました。", ephemeral=True)
+    await interaction.response.send_message(f"声の調子を「{mood.name}」にしました。", ephemeral=True)
 
 
 VOICE_SPEED_CHOICES = [
@@ -503,7 +533,7 @@ async def voice_command(interaction: discord.Interaction, speed: discord.app_com
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     voice_speed = speed.value
-    await interaction.response.send_message(f"🎙️ 話す速さを「{speed.name}」にしました。", ephemeral=True)
+    await interaction.response.send_message(f"話す速さを「{speed.name}」にしました。", ephemeral=True)
 
 
 # 狂気モードを強制的に切り替える（/crazy。管理者だけ）
@@ -520,12 +550,12 @@ async def crazy_command(interaction: discord.Interaction, state: discord.app_com
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     force_crazy = state.value == "on"
-    msg = "😈 狂気モードを強制的にONにしました。" if force_crazy else "🙂 狂気モードをOFFにしました。"
+    msg = "狂気モードを強制的にONにしました。" if force_crazy else "狂気モードをOFFにしました。"
     await interaction.response.send_message(msg, ephemeral=True)
 
 
 CHEER_MESSAGES = [
-    "みんな、今日もがんばろう！応援してるよ📣",
+    "みんな、今日もがんばろう！応援してるよ",
     "ここまで来たのは本当にすごいこと。自信を持って！",
     "うまくいかない日があってもいい。明日また行こう！",
     "小さな一歩も、ちゃんと前に進んでる。えらい！",
@@ -543,14 +573,24 @@ async def cheer_command(interaction: discord.Interaction):
     last = cheer_last_sent.get(interaction.channel_id)
     if last is not None and now - last < CHEER_COOLDOWN_SECONDS:
         wait = int(CHEER_COOLDOWN_SECONDS - (now - last))
-        await interaction.response.send_message(f"⏳ 少し待ってから送ってください（あと {wait} 秒）", ephemeral=True)
+        await interaction.response.send_message(f"少し待ってから送ってください（あと {wait} 秒）", ephemeral=True)
         return
     cheer_last_sent[interaction.channel_id] = now
     msg = random.choice(CHEER_MESSAGES)
     await interaction.response.send_message(
-        f"📣 {interaction.user.display_name} さんから応援です！\n{msg}",
+        f"{interaction.user.display_name} さんから応援です！\n{msg}",
         allowed_mentions=discord.AllowedMentions.none(),
     )
+
+
+# ウェブで話す画面のリンクとアクセスコードを、本人にだけ表示する（/virtual）
+@bot.tree.command(name="virtual", description="ウェブで話すためのリンクとアクセスコードを表示します")
+async def virtual_command(interaction: discord.Interaction):
+    text = web_talk_message()
+    if text is None:
+        await interaction.response.send_message("ウェブのリンクが設定されていません。", ephemeral=True)
+        return
+    await interaction.response.send_message(text, ephemeral=True)
 
 
 async def start_health_server() -> None:
