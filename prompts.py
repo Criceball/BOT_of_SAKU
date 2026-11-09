@@ -119,7 +119,7 @@ def sanitize_reply(reply: str, persona: str | None = None) -> str:
 # ===== 音声の感情表現（Fish Audio のタグ。角かっこで書く） =====
 # 通常時と、狂気時のタグ。ここを変えると、音声の調子が変わります。
 TTS_TAGS_NORMAL = "[落ち着いた様子で]"
-TTS_TAGS_CRAZY = "[怒り狂う][早口で]"
+TTS_TAGS_CRAZY = "[怒り狂う][早口で][hysterical][furious, screaming]"
 # この言葉がユーザーの発言に入ると、その返事は狂気時の声になります
 CRAZY_TRIGGERS = ["狂って"]
 
