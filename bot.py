@@ -8,6 +8,8 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 
 import discord
+
+import usage_store
 from discord.ext import commands
 from dotenv import load_dotenv
 from groq import Groq
@@ -118,12 +120,14 @@ def budget_available() -> bool:
     return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
 
 
-def record_tokens(used: int) -> None:
+async def record_tokens(used: int, user_id: int | None = None) -> None:
     today = today_jst()
     # 前日以前の記録は捨てる
     for old_day in [d for d in daily_tokens if d != today]:
         del daily_tokens[old_day]
     daily_tokens[today] += used
+    # 再起動しても消えないように、保存する
+    await usage_store.add(today, used, user_id)
 
 
 async def generate_reply(messages: list[dict]) -> tuple[str, int]:
@@ -303,7 +307,7 @@ async def handle_mention(message: discord.Message) -> None:
                 {"role": "system", "content": build_system_prompt()},
                 *history,
             ])
-            record_tokens(used_tokens)
+            await record_tokens(used_tokens, message.author.id)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
             refund_quota(quota_key)
@@ -349,7 +353,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
             {"role": "system", "content": build_system_prompt()},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
         ])
-        record_tokens(used_tokens)
+        await record_tokens(used_tokens, interaction.user.id)
         reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
         # 音声にする分は短くして、音声の料金を抑える
@@ -407,12 +411,13 @@ async def persona_command(
 # 今日の使用量を表示する（/usage）。結果は本人にだけ見える。
 @bot.tree.command(name="usage", description="今日のAIの使用量を表示しますよ〜")
 async def usage_command(interaction: discord.Interaction):
-    today = datetime.now(JST).strftime("%Y-%m-%d")
-    total = daily_tokens.get(today_jst(), 0)
+    today = today_jst()
+    stored = await usage_store.totals(today, interaction.user.id)
     mine = daily_usage.get((interaction.user.id, today), 0)
     msg = (
         "今日の使用量\n"
-        f"- 全体のトークン：{total:,} / {DAILY_TOKEN_BUDGET:,}\n"
+        f"- 全体のトークン：{stored['tokens']:,} / {DAILY_TOKEN_BUDGET:,}（{stored['requests']}回）\n"
+        f"- あなたのトークン：{stored['user_tokens']:,}（{stored['user_requests']}回）\n"
         f"- あなたの回数：{mine} / {DAILY_LIMIT_PER_USER}"
     )
     await interaction.response.send_message(msg, ephemeral=True)
@@ -476,8 +481,9 @@ async def stats_command(interaction: discord.Interaction):
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     today = datetime.now(JST).strftime("%Y-%m-%d")
-    total_tokens = daily_tokens.get(today_jst(), 0)
-    requests = sum(n for (_, day), n in daily_usage.items() if day == today)
+    stored = await usage_store.totals(today_jst())
+    total_tokens = stored["tokens"]
+    requests = stored["requests"]
     users = len({uid for (uid, day), n in daily_usage.items() if day == today and n > 0})
     channels = sum(1 for history in chat_history.values() if history)
     msg = (
@@ -664,6 +670,9 @@ async def start_health_server() -> None:
 
 
 async def setup_hook() -> None:
+    # 再起動の後も、今日の使用量を続きから数えられるように、保存された値を読み直す
+    today = today_jst()
+    daily_tokens[today] = (await usage_store.totals(today))["tokens"]
     # HTTP の応答は main.py（Web画面と同じポート）が受け持つので、ここでは立てない
     # スラッシュコマンドを Discord に登録する（反映まで数分〜1時間かかることがある）
     await bot.tree.sync()
