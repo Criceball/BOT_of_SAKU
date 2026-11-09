@@ -607,6 +607,46 @@ async def virtual_command(interaction: discord.Interaction):
     await interaction.response.send_message(text, ephemeral=True)
 
 
+# 入力した文章を、みんなに送る（/say）。管理者も、ほかの人と同じ表示・同じ上限にする（管理者だとわからないように）。
+@bot.tree.command(name="say", description="入力した文章を、みんなに送ります（音声も付けられます）")
+@discord.app_commands.describe(text="送る文章（300文字まで）", voice="音声も作るか（省略するとテキストだけ）")
+@discord.app_commands.choices(voice=[
+    discord.app_commands.Choice(name="音声あり", value="yes"),
+    discord.app_commands.Choice(name="テキストだけ", value="no"),
+])
+async def say_command(
+    interaction: discord.Interaction,
+    text: str,
+    voice: discord.app_commands.Choice[str] | None = None,
+):
+    if len(text) > TALK_INPUT_LIMIT:
+        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
+        return
+    if not budget_available():
+        await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
+        return
+    quota_key = take_quota(interaction.user.id)
+    if quota_key is None:
+        await interaction.response.send_message(QUOTA_MESSAGE, ephemeral=True)
+        return
+    mentions = discord.AllowedMentions.none()
+    with_voice = voice is not None and voice.value == "yes"
+    if not with_voice:
+        await interaction.response.send_message(text, allowed_mentions=mentions)
+        return
+    await interaction.response.defer()
+    try:
+        audio = await synthesize_speech(text)
+    except Exception:
+        daily_usage[quota_key] -= 1   # 音声が作れなかった分は数えない
+        await interaction.followup.send("音声を作れませんでした。もう一度お試しください。", ephemeral=True)
+        return
+    await interaction.followup.send(
+        text,
+        file=discord.File(io.BytesIO(audio), filename="say.mp3"),
+        allowed_mentions=mentions,
+    )
+
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
     # PORT が設定されているときだけ、ヘルスチェック用の小さなサーバーを立てる。
