@@ -39,7 +39,12 @@
 
   /* 画面：映像は黒い「舞台」、操作は白いすりガラスの帯 */
   #room { position: fixed; inset: 0; background: var(--parchment); display: flex; flex-direction: column; }
-  #stage { position: relative; flex: 1 1 auto; min-height: 36vh; margin: 12px 12px 0; border-radius: 18px; background: #000; overflow: hidden; }
+  /* 窓の形は、表示している画像・動画の縦横比に合わせる（初めは縦横 9:16）。黒い帯が見えないようにする */
+  #stage {
+    --ar: 0.5625;                                   /* 幅 ÷ 高さ（9:16） */
+    position: relative; flex: 0 0 auto; margin: 12px auto 0; border-radius: 18px; background: #000; overflow: hidden;
+    width: min(calc(100vw - 24px), calc(56vh * var(--ar))); aspect-ratio: var(--ar);
+  }
   #pic, #talkPic { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
   #talkPic[hidden] { display: none !important; }
   /* 動画は、場面ごとに1つずつ用意して、読み込み済みのものを切り替える（読み直さないので映像がちらつかない） */
@@ -50,7 +55,7 @@
   /* 小窓（別窓が使えないスマホなどは、画面の中に小さく出す） */
   #room.mini { background: var(--parchment); }
   #room.mini #stage {
-    position: fixed; inset: auto; top: 16px; right: 16px; margin: 0; width: min(300px, 60vw); aspect-ratio: 16 / 9;
+    position: fixed; inset: auto; top: 16px; right: 16px; margin: 0; width: min(300px, 60vw);
     border-radius: 14px; border: 1px solid var(--hairline); z-index: 20;
   }
 
@@ -110,7 +115,7 @@
   /* 全画面のときは、操作の帯を出さない（Escで戻れます） */
   html.fs #ui { display: none; }
   html.fs #room { background: #000; }
-  html.fs #stage { margin: 0; border-radius: 0; }
+  html.fs #stage { margin: 0; border-radius: 0; width: 100vw; height: 100vh; aspect-ratio: auto; }
 </style>
 </head>
 <body>
@@ -385,7 +390,12 @@
     imageEntry = { blob: f, name: f.name };
     saveState();
   });
-  pic.addEventListener('load', () => { pic.dataset.broken = ''; showIdle(); });
+  // 窓の縦横比を、画像・動画の大きさに合わせる
+  function setStageRatio(w, h) {
+    if (w > 0 && h > 0) $('stage').style.setProperty('--ar', (w / h).toFixed(4));
+  }
+  pic.addEventListener('load', () => { pic.dataset.broken = ''; setStageRatio(pic.naturalWidth, pic.naturalHeight); showIdle(); });
+  talkPic.addEventListener('load', () => setStageRatio(talkPic.naturalWidth, talkPic.naturalHeight));
   pic.addEventListener('error', () => { pic.dataset.broken = '1'; showIdle(); });
 
   // 待機中の表示：基本の画像を出す（動画と話している時の画像は隠す）。画像がなければ案内の文字
@@ -417,6 +427,7 @@
       if (cur !== el) return;
       el.currentTime = 0;
       el.classList.add('on');
+      setStageRatio(el.videoWidth, el.videoHeight);
       if (prev) { prev.classList.remove('on'); prev.pause(); }
     };
     el.play().catch(() => {});
