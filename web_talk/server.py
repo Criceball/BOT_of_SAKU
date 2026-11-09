@@ -6,6 +6,7 @@
 import asyncio
 import atexit
 import hmac
+from collections import defaultdict
 import logging
 import os
 import re
@@ -48,6 +49,10 @@ PORT = int(os.getenv("PORT") or os.getenv("WEB_PORT", "8000"))
 ACCESS_KEY = os.getenv("WEB_ACCESS_KEY", "")  # 空のときは、画面を無効にする（main.py が判断する）
 # アクセスキーが合ったとき、最初に読み込むパッケージ（Google ドライブの共有リンク。zip）
 PACKAGE_URL = os.getenv("PACKAGE_URL", "")
+# 開発者用のアクセスキー。これで入ると、回数の制限がかからない
+DEV_ACCESS_KEY = os.getenv("WEB_DEV_ACCESS_KEY", "")
+# 1人（1つのIPアドレス）が1日に話せる回数。開発者用のキーでは制限しない
+WEB_DAILY_LIMIT = 30
 
 MAX_REPLY_TOKENS = 2048
 HISTORY_LIMIT = 6  # 直近の発言を何件まで覚えるか
@@ -94,12 +99,43 @@ def json_error(message: str, status: int) -> web.Response:
     return web.json_response({"error": message}, status=status)
 
 
+# 回数の記録（利用者, 日付）→ 回数。利用者は、Render が渡す接続元のIPアドレス
+web_usage: dict[tuple[str, str], int] = defaultdict(int)
+
+
+def client_id(request: web.Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    return forwarded.split(",")[0].strip() or (request.remote or "unknown")
+
+
+def remaining_for(request: web.Request) -> int | None:
+    # 残りの回数。開発者用のキーなら None（無制限）
+    if request.get("unlimited"):
+        return None
+    return max(0, WEB_DAILY_LIMIT - web_usage[(client_id(request), today())])
+
+
+def count_use(request: web.Request) -> bool:
+    # 1回分を数える。上限に達していたら False（数えない）
+    if request.get("unlimited"):
+        return True
+    key = (client_id(request), today())
+    if web_usage[key] >= WEB_DAILY_LIMIT:
+        return False
+    for old in [k for k in web_usage if k[1] != key[1]]:
+        del web_usage[old]
+    web_usage[key] += 1
+    return True
+
+
 @web.middleware
 async def require_access_key(request: web.Request, handler):
     # /api/ への呼び出しは、アクセスキーが合っている場合だけ通す
     if request.path.startswith("/api/"):
         given = request.headers.get("X-Access-Key", "")
-        if not hmac.compare_digest(given, ACCESS_KEY):
+        if DEV_ACCESS_KEY and hmac.compare_digest(given, DEV_ACCESS_KEY):
+            request["unlimited"] = True
+        elif not (ACCESS_KEY and hmac.compare_digest(given, ACCESS_KEY)):
             return json_error("アクセスキーが違います", 401)
     return await handler(request)
 
@@ -129,6 +165,8 @@ async def chat(request: web.Request) -> web.Response:
         return json_error(f"{MAX_CHAT_CHARS}文字までです", 400)
     if not budget_left():
         return json_error("もうあなたとは話したくない", 429)
+    if not count_use(request):
+        return json_error(f"今日の利用回数（{WEB_DAILY_LIMIT}回）に達しました。明日また使えます。", 429)
 
     crazy = is_crazy(text)
     history.append({"role": "user", "content": wrap_user_message(text, "相手")})
@@ -143,6 +181,8 @@ async def chat(request: web.Request) -> web.Response:
         )
     except Exception as e:
         history.pop()
+        if not request.get("unlimited"):
+            web_usage[(client_id(request), today())] -= 1   # 失敗した分は数えない
         return json_error(f"AIとの通信に失敗しました: {e}", 502)
 
     if completion.usage:
@@ -151,7 +191,12 @@ async def chat(request: web.Request) -> web.Response:
     reply = strip_emotions(raw)
     history.append({"role": "assistant", "content": reply[:300]})
     del history[:-HISTORY_LIMIT]
-    return web.json_response({"reply": reply, "crazy": crazy, "sentences": parse_emotions(raw)})
+    return web.json_response({
+        "reply": reply,
+        "crazy": crazy,
+        "sentences": parse_emotions(raw),
+        "remaining": remaining_for(request),
+    })
 
 
 async def tts(request: web.Request) -> web.StreamResponse:
@@ -220,7 +265,8 @@ def drive_download_url(link: str) -> str:
 
 async def check(request: web.Request) -> web.Response:
     # 画面の参加前に、アクセスキーが合っているかを確かめる（合わなければ、ミドルウェアが 401 を返す）
-    return web.json_response({"ok": True})
+    remaining = remaining_for(request)
+    return web.json_response({"ok": True, "unlimited": remaining is None, "remaining": remaining})
 
 
 async def package(request: web.Request) -> web.StreamResponse:

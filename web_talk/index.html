@@ -126,6 +126,7 @@
   </div>
   <div id="ui">
     <div id="status"></div>
+    <div id="quota" class="hint"></div>
     <div id="subtitle"></div>
 
     <div class="row">
@@ -175,6 +176,7 @@
   const stage = $('stage');
   const subtitle = $('subtitle');
   const statusEl = $('status');
+  const quotaEl = $('quota');
   const replyEl = $('player');
   const fillerEl = $('filler');
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -288,6 +290,13 @@
     toggleMiniWindow();
   };
 
+  // 今日あと何回話せるかを表示する（開発者用のキーは制限なし）
+  function showQuota(j) {
+    if (!j) return;
+    if (j.unlimited) quotaEl.textContent = '開発者モード（回数の制限はありません）';
+    else if (typeof j.remaining === 'number') quotaEl.textContent = `今日あと ${j.remaining} 回話せます`;
+  }
+
   // ---- 参加画面：アクセスキーが合っているかを、最初に確かめる ----
   $('key').addEventListener('input', () => {
     $('join-btn').disabled = !$('key').value.trim();
@@ -299,6 +308,7 @@
   $('join-btn').onclick = async () => {
     $('join-btn').disabled = true;
     $('joinMsg').textContent = '確かめています…';
+    let quota = null;
     try {
       const r = await fetch('/api/check', { method: 'POST', headers: authHeaders() });
       if (!r.ok) {
@@ -306,6 +316,7 @@
         $('join-btn').disabled = !$('key').value.trim();
         return;
       }
+      quota = await r.json().catch(() => null);
     } catch (_) {
       $('joinMsg').textContent = '通信できませんでした。もう一度お試しください';
       $('join-btn').disabled = !$('key').value.trim();
@@ -317,6 +328,7 @@
     $('room').hidden = false;
     showIdle();
     showUi();
+    showQuota(quota);
     await loadPackageFromServer();   // アクセスキーが合ったら、パッケージ（Google ドライブの zip）を最初に読み込む
   };
 
@@ -677,7 +689,9 @@
       if (myGen !== gen) return;
       replyCrazy = !!j.crazy;
       stopFiller();   // 返事が来たので「はい！」を止める
+      showQuota(j);
       if (!r.ok) {
+        if (r.status === 429) quotaEl.textContent = '今日の回数を使い切りました。明日また話せます';
         subtitle.textContent = j.error || "エラーが発生しました";
         await fillerDone;
         return;
