@@ -109,11 +109,13 @@ KNOWLEDGE_RULE = """\
 """
 
 
-def build_system_prompt(persona: str | None = None) -> str:
+def build_system_prompt(persona: str | None = None, extra: str | None = None) -> str:
     # persona を渡すと、その性格で作る（Web とボットで、性格を分けるため）
+    # extra は、質問に関係する参考情報（Google ドライブから探したもの）
     club = load_club_info()
     club_block = f"\n【部活の情報】\n{club}\n" if club else ""
-    return f"{persona or current_persona()}\n{club_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
+    ref_block = f"\n【参考情報（質問に関係する部分）】\n{extra}\n" if extra else ""
+    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:

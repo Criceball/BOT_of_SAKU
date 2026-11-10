@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
+import knowledge  # noqa: E402
 import usage_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
@@ -172,7 +173,7 @@ async def chat(request: web.Request) -> web.Response:
     crazy = is_crazy(text)
     history.append({"role": "user", "content": wrap_user_message(text, "相手")})
     del history[:-HISTORY_LIMIT]
-    messages = [{"role": "system", "content": build_system_prompt(web_persona())}, *history]
+    messages = [{"role": "system", "content": build_system_prompt(web_persona(), extra=await knowledge.lookup(text))}, *history]
     try:
         completion = await asyncio.to_thread(
             groq_client.chat.completions.create,
