@@ -654,6 +654,39 @@ async def say_command(
         allowed_mentions=mentions,
     )
 
+# 指定したチャンネルの会話履歴を500件取り出して、テキストファイルで本人にだけ渡す（/deta。管理者だけ）
+# 1行＝1発言：[日時] 名前: 内容。ボットの発言は含めない。
+@bot.tree.command(name="deta", description="指定したチャンネルの会話を500件、テキストで取り出します（管理者だけ）")
+@discord.app_commands.default_permissions(administrator=True)
+@discord.app_commands.describe(channel="取り出すチャンネル（省略すると、今のチャンネル）")
+async def deta_command(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    target = channel or interaction.channel
+    perms = target.permissions_for(interaction.guild.me)
+    if not (perms.view_channel and perms.read_message_history):
+        await interaction.response.send_message("ボットは、そのチャンネルの履歴を読めません。権限を確かめてください。", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    lines = []
+    async for message in target.history(limit=500, oldest_first=True):
+        if message.author.bot:
+            continue
+        stamp = message.created_at.astimezone(JST).strftime("%Y-%m-%d %H:%M")
+        text = message.content.replace("\r", "").replace("\n", " / ")
+        for attachment in message.attachments:
+            text += f" [添付: {attachment.filename}]"
+        lines.append(f"[{stamp}] {message.author.display_name}: {text}")
+    body = "\n".join(lines) or "（発言がありませんでした）"
+    file = discord.File(io.BytesIO(body.encode("utf-8-sig")), filename=f"{target.name}-history.txt")
+    await interaction.followup.send(
+        f"{target.mention} の会話を {len(lines)} 件取り出しました（ボットの発言は除く）。",
+        file=file,
+        ephemeral=True,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
     # PORT が設定されているときだけ、ヘルスチェック用の小さなサーバーを立てる。
