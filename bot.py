@@ -50,7 +50,9 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 # 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")            # 普段の会話（軽くて安い）
+GROQ_DEEP_MODEL = os.getenv("GROQ_DEEP_MODEL", "openai/gpt-oss-120b")  # 「詳しく教えて」や /deep で使う（賢い）
+GROQ_WHISPER_MODEL = os.getenv("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")  # 音声を文字にする
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
@@ -131,12 +133,19 @@ async def record_tokens(used: int, user_id: int | None = None) -> None:
     await usage_store.add(today, used, user_id)
 
 
-async def generate_reply(messages: list[dict]) -> tuple[str, int]:
+DEEP_TRIGGERS = ("詳しく教えて",)
+
+
+def is_deep(text: str) -> bool:
+    return any(t in text for t in DEEP_TRIGGERS)
+
+
+async def generate_reply(messages: list[dict], model: str | None = None) -> tuple[str, int]:
     # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
     completion = await asyncio.to_thread(
         groq_client.chat.completions.create,
         messages=messages,
-        model=GROQ_MODEL,
+        model=model or GROQ_MODEL,
         max_completion_tokens=MAX_REPLY_TOKENS,
     )
     used = completion.usage.total_tokens if completion.usage else 0
@@ -176,6 +185,11 @@ async def on_ready():
     print(f"ログイン成功ですよ〜: {bot.user.name}")
 
 
+def is_reply_to_bot(message: discord.Message) -> bool:
+    ref = message.reference
+    return ref is not None and isinstance(ref.resolved, discord.Message) and ref.resolved.author == bot.user
+
+
 @bot.event
 async def on_message(message: discord.Message):
     # ボット自身や他のボットの発言には反応しない
@@ -188,8 +202,9 @@ async def on_message(message: discord.Message):
         return
 
     # コマンド（!join など）以外で、ボットがメンションされたら会話する
+    has_audio = any(is_audio(a) for a in message.attachments)
     if (
-        bot.user in message.mentions
+        (bot.user in message.mentions or (has_audio and is_reply_to_bot(message)))
         and not message.content.startswith(bot.command_prefix)
     ):
         await handle_mention(message)
@@ -272,8 +287,18 @@ async def handle_mention(message: discord.Message) -> None:
     # メンション部分を取り除いて本文だけを取り出す
     text = MENTION_PATTERN.sub("", message.content).strip()
 
-    # 添付ファイルがあれば、会話ではなくファイル変換として扱う
-    attachments = get_attachments(message)
+    # 音声の添付は文字にして、本文に足す
+    audio_files = [a for a in message.attachments if is_audio(a)]
+    if audio_files:
+        try:
+            transcript = await transcribe(await audio_files[0].read(), audio_files[0].filename)
+        except Exception as e:
+            await message.reply(f"音声を聞き取れませんでした: `{e}`")
+            return
+        text = f"{text} {transcript}".strip()
+
+    # 添付ファイルがあれば、会話ではなくファイル変換として扱う（音声以外）
+    attachments = [a for a in get_attachments(message) if not is_audio(a)]
     if attachments:
         await handle_conversion(message, attachments[0], text)
         return
@@ -305,9 +330,9 @@ async def handle_mention(message: discord.Message) -> None:
     async with message.channel.typing():
         try:
             reply_text, used_tokens = await generate_reply([
-                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(message.content))},
+                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
                 *history,
-            ])
+            ], model=GROQ_DEEP_MODEL if is_deep(text) else GROQ_MODEL)
             await record_tokens(used_tokens, message.author.id)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
@@ -322,8 +347,17 @@ async def handle_mention(message: discord.Message) -> None:
     reply_text = strip_emotions(sanitize_reply(reply_text))
     history.append({"role": "assistant", "content": reply_text[:HISTORY_CHAR_LIMIT]})
     # AIの返答で @everyone などが鳴らないように、メンションを無効にする
+    files = []
+    if wants_voice_reply(text):
+        # 「音声で話して」と言われたときは、返事も音声で付ける（失敗したら文字だけ）
+        try:
+            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
+            files.append(discord.File(io.BytesIO(audio_bytes), filename="reply.mp3"))
+        except Exception:
+            pass
     await message.reply(
         reply_text[:DISCORD_MESSAGE_LIMIT],
+        files=files,
         allowed_mentions=discord.AllowedMentions.none(),
     )
 
@@ -334,8 +368,21 @@ TALK_INPUT_LIMIT = 300
 
 
 @bot.tree.command(name="talk", description="AIに話しかけますよ〜（返事と音声が届きますよ〜）")
-@discord.app_commands.describe(text="話しかける内容")
-async def talk_command(interaction: discord.Interaction, text: str):
+@discord.app_commands.describe(text="話しかける文章（音声のファイルだけでもOK）", audio="話しかける音声（任意）")
+async def talk_command(interaction: discord.Interaction, text: str = "", audio: discord.Attachment | None = None):
+    await run_talk(interaction, text, audio, GROQ_MODEL)
+
+
+@bot.tree.command(name="deep", description="詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）")
+@discord.app_commands.describe(text="聞きたいこと（音声のファイルだけでもOK）", audio="聞きたいこと（音声・任意）")
+async def deep_command(interaction: discord.Interaction, text: str = "", audio: discord.Attachment | None = None):
+    await run_talk(interaction, text, audio, GROQ_DEEP_MODEL)
+
+
+async def run_talk(interaction: discord.Interaction, text: str, audio, model: str) -> None:
+    if not text and audio is None:
+        await interaction.response.send_message("何か話しかけてくださいね〜（文章か音声を入れてください）", ephemeral=True)
+        return
     if len(text) > TALK_INPUT_LIMIT:
         await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
         return
@@ -349,11 +396,19 @@ async def talk_command(interaction: discord.Interaction, text: str):
 
     await interaction.response.defer(thinking=True)
     try:
+        # 音声の添付は、文字にしてから使う（話しかけた文章と合わせる）
+        if audio is not None:
+            if not is_audio(audio):
+                raise ValueError("音声のファイルを選んでくださいね〜")
+            transcript = await transcribe(await audio.read(), audio.filename)
+            if not transcript:
+                raise ValueError("音声を聞き取れませんでしたよ〜")
+            text = f"{text} {transcript}".strip()[:TALK_INPUT_LIMIT]
         # ① Groq APIでAIの返答テキストを生成
         raw_reply, used_tokens = await generate_reply([
             {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
-        ])
+        ], model=model)
         await record_tokens(used_tokens, interaction.user.id)
         reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
@@ -439,6 +494,7 @@ async def help_command(interaction: discord.Interaction):
         "- `/virtual`：ウェブで話す画面のリンクとアクセスコードを見せますよ〜",
         "- `/usage`：今日の使用量と、あなたの残りの回数を見せますよ〜",
         "- `/reset`：このチャンネルの会話の履歴を消しますよ〜",
+        "- `/deep`：詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）",
         "- `/model`：AIが使っているモデルを見せますよ〜",
         "- `/persona`：AIの性格を見る・変える・元に戻しますよ〜（管理者だけ）",
         "- `/deta`：チャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）",
@@ -691,6 +747,34 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
     )
+
+AUDIO_EXTENSIONS = (".ogg", ".mp3", ".wav", ".m4a", ".webm", ".flac", ".mp4", ".mpga", ".mpeg")
+
+
+def is_audio(attachment: discord.Attachment) -> bool:
+    content_type = attachment.content_type or ""
+    return content_type.startswith("audio/") or attachment.filename.lower().endswith(AUDIO_EXTENSIONS)
+
+
+async def transcribe(data: bytes, filename: str) -> str:
+    # 音声を文字にする（Groq の Whisper）。同期APIのため、別スレッドで実行する
+    result = await asyncio.to_thread(
+        groq_client.audio.transcriptions.create,
+        file=(filename, data),
+        model=GROQ_WHISPER_MODEL,
+        response_format="text",
+        language="ja",
+    )
+    return (result if isinstance(result, str) else getattr(result, "text", "")).strip()
+
+
+# 「音声で話して」と言われたときは、返事も音声で送る
+VOICE_REPLY_TRIGGERS = ("音声で話して", "声で話して")
+
+
+def wants_voice_reply(text: str) -> bool:
+    return any(t in text for t in VOICE_REPLY_TRIGGERS)
+
 
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
