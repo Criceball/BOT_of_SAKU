@@ -15,6 +15,7 @@ Render の **Web Service** を、このリポジトリ（`feature/web-talk` ブ�
   - `PERSONA`（性格の設定。`persona.txt` の中身をそのまま貼る）
   - `WEB_ACCESS_KEY`（**必須**。画面を開く人に教える合言葉です。これがないと起動しません）
   - `UPSTASH_REDIS_REST_URL` と `UPSTASH_REDIS_REST_TOKEN`（任意。トークンの使用量を、再起動しても消えないように保存します。Upstash の無料の Redis で作れます）
+  - `CLUB_INFO`（任意。部活の活動内容や予定など。AI が、これをもとに答えます。`club.txt` に書いても同じです）
   - `WEB_DEV_ACCESS_KEY`（任意。開発者用の合言葉。これで入ると、回数の制限がかかりません）
   - `PACKAGE_URL`（任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンク。合言葉が合うと、最初に読み込みます）
   - 任意：`GROQ_MODEL`、`FISH_MODEL`

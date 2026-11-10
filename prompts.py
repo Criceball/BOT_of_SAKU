@@ -90,9 +90,30 @@ def current_persona() -> str:
     return _persona_override or PERSONA
 
 
+# 部活の情報（活動内容・予定など）。環境変数 CLUB_INFO か、club.txt（公開しない・Git に入れない）に書く
+CLUB_INFO_PATH = Path(__file__).with_name("club.txt")
+
+
+def load_club_info() -> str:
+    text = os.getenv("CLUB_INFO", "").strip()
+    if not text and CLUB_INFO_PATH.exists():
+        text = CLUB_INFO_PATH.read_text(encoding="utf-8").strip()
+    return text
+
+
+# 知らないことを「存在しない」と言わせないためのルール
+KNOWLEDGE_RULE = """\
+【知らないこと】
+- 部活の活動や予定など、上に書かれていない話を聞かれたら、「そういう話は分からないです」と答えてください。
+- 「存在しない」「そんなものはない」とは言わないでください。分からないことは、分からないと伝えてください。
+"""
+
+
 def build_system_prompt(persona: str | None = None) -> str:
     # persona を渡すと、その性格で作る（Web とボットで、性格を分けるため）
-    return f"{persona or current_persona()}\n{LENGTH_RULE}\n{EMOTION_RULE}\n{SECURITY_RULES}"
+    club = load_club_info()
+    club_block = f"\n【部活の情報】\n{club}\n" if club else ""
+    return f"{persona or current_persona()}\n{club_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
