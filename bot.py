@@ -50,7 +50,8 @@ FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 
 # 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")            # 普段の会話（軽くて安い）
+GROQ_DEEP_MODEL = os.getenv("GROQ_DEEP_MODEL", "openai/gpt-oss-120b")  # 「詳しく教えて」や /deep で使う（賢い）
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
@@ -131,12 +132,19 @@ async def record_tokens(used: int, user_id: int | None = None) -> None:
     await usage_store.add(today, used, user_id)
 
 
-async def generate_reply(messages: list[dict]) -> tuple[str, int]:
+DEEP_TRIGGERS = ("詳しく教えて",)
+
+
+def is_deep(text: str) -> bool:
+    return any(t in text for t in DEEP_TRIGGERS)
+
+
+async def generate_reply(messages: list[dict], model: str | None = None) -> tuple[str, int]:
     # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
     completion = await asyncio.to_thread(
         groq_client.chat.completions.create,
         messages=messages,
-        model=GROQ_MODEL,
+        model=model or GROQ_MODEL,
         max_completion_tokens=MAX_REPLY_TOKENS,
     )
     used = completion.usage.total_tokens if completion.usage else 0
@@ -305,9 +313,9 @@ async def handle_mention(message: discord.Message) -> None:
     async with message.channel.typing():
         try:
             reply_text, used_tokens = await generate_reply([
-                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(message.content))},
+                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
                 *history,
-            ])
+            ], model=GROQ_DEEP_MODEL if is_deep(text) else GROQ_MODEL)
             await record_tokens(used_tokens, message.author.id)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
@@ -322,8 +330,17 @@ async def handle_mention(message: discord.Message) -> None:
     reply_text = strip_emotions(sanitize_reply(reply_text))
     history.append({"role": "assistant", "content": reply_text[:HISTORY_CHAR_LIMIT]})
     # AIの返答で @everyone などが鳴らないように、メンションを無効にする
+    files = []
+    if wants_voice_reply(text):
+        # 「音声で話して」と言われたときは、返事も音声で付ける（失敗したら文字だけ）
+        try:
+            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
+            files.append(discord.File(io.BytesIO(audio_bytes), filename="reply.mp3"))
+        except Exception:
+            pass
     await message.reply(
         reply_text[:DISCORD_MESSAGE_LIMIT],
+        files=files,
         allowed_mentions=discord.AllowedMentions.none(),
     )
 
@@ -334,8 +351,21 @@ TALK_INPUT_LIMIT = 300
 
 
 @bot.tree.command(name="talk", description="AIに話しかけますよ〜（返事と音声が届きますよ〜）")
-@discord.app_commands.describe(text="話しかける内容")
+@discord.app_commands.describe(text="話しかける文章")
 async def talk_command(interaction: discord.Interaction, text: str):
+    await run_talk(interaction, text, GROQ_MODEL)
+
+
+@bot.tree.command(name="deep", description="詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）")
+@discord.app_commands.describe(text="聞きたいこと")
+async def deep_command(interaction: discord.Interaction, text: str):
+    await run_talk(interaction, text, GROQ_DEEP_MODEL)
+
+
+async def run_talk(interaction: discord.Interaction, text: str, model: str) -> None:
+    if not text:
+        await interaction.response.send_message("何か話しかけてくださいね〜", ephemeral=True)
+        return
     if len(text) > TALK_INPUT_LIMIT:
         await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
         return
@@ -353,7 +383,7 @@ async def talk_command(interaction: discord.Interaction, text: str):
         raw_reply, used_tokens = await generate_reply([
             {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
-        ])
+        ], model=model)
         await record_tokens(used_tokens, interaction.user.id)
         reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
@@ -439,6 +469,7 @@ async def help_command(interaction: discord.Interaction):
         "- `/virtual`：ウェブで話す画面のリンクとアクセスコードを見せますよ〜",
         "- `/usage`：今日の使用量と、あなたの残りの回数を見せますよ〜",
         "- `/reset`：このチャンネルの会話の履歴を消しますよ〜",
+        "- `/deep`：詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）",
         "- `/model`：AIが使っているモデルを見せますよ〜",
         "- `/persona`：AIの性格を見る・変える・元に戻しますよ〜（管理者だけ）",
         "- `/deta`：チャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）",
@@ -691,6 +722,14 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
     )
+
+# 「音声で話して」と言われたときは、返事も音声で送る
+VOICE_REPLY_TRIGGERS = ("音声で話して", "声で話して", "音声で答えて", "声で答えて")
+
+
+def wants_voice_reply(text: str) -> bool:
+    return any(t in text for t in VOICE_REPLY_TRIGGERS)
+
 
 async def start_health_server() -> None:
     # Koyeb などのWebサービスは、PORT で HTTP に応答しないと「異常」と判定される。
