@@ -71,7 +71,7 @@ MAX_UPLOAD_FILES = 10
 # 1人1日の会話回数（メンションの会話と /talk の合計）。日付は日本時間で切り替える
 DAILY_LIMIT_PER_USER = 20
 JST = timezone(timedelta(hours=9))
-QUOTA_MESSAGE = f"今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しました。明日また使えます。"
+QUOTA_MESSAGE = f"今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しましたよ〜。明日また使えますよ〜"
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -333,11 +333,11 @@ async def handle_mention(message: discord.Message) -> None:
 TALK_INPUT_LIMIT = 300
 
 
-@bot.tree.command(name="talk", description="AIに話しかけます（返事と音声が届きます）")
+@bot.tree.command(name="talk", description="AIに話しかけますよ〜（返事と音声が届きますよ〜）")
 @discord.app_commands.describe(text="話しかける内容")
 async def talk_command(interaction: discord.Interaction, text: str):
     if len(text) > TALK_INPUT_LIMIT:
-        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
+        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
         return
     if not budget_available():
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
@@ -376,7 +376,7 @@ PERSONA_MAX_CHARS = 1000
 
 
 # 性格の確認・変更・リセット（サーバーの管理者だけが使える）。結果は本人にだけ見える。
-@bot.tree.command(name="persona", description="AIの性格を確認・変更・リセットします（管理者だけ）")
+@bot.tree.command(name="persona", description="AIの性格を確認・変更・リセットしますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(action="確認・変更・リセットのどれか", text="変更するときの性格の文章")
 @discord.app_commands.choices(action=[
@@ -425,26 +425,31 @@ async def usage_command(interaction: discord.Interaction):
 
 
 # 使えるコマンドの一覧と使い方を表示する（/help）。本人にだけ見える。
-@bot.tree.command(name="help", description="コマンドの一覧と使い方を表示します")
+@bot.tree.command(name="help", description="コマンドの一覧と使い方を表示しますよ〜")
 async def help_command(interaction: discord.Interaction):
-    lines = ["コマンドの一覧"]
+    lines = ["コマンドの一覧ですよ〜"]
     for cmd in sorted(bot.tree.get_commands(), key=lambda c: c.name):
         lines.append(f"- `/{cmd.name}`：{cmd.description}")
     lines += [
         "",
         "使い方の例",
-        f"- `/talk text:こんにちは`：AIに話しかけます（{TALK_INPUT_LIMIT}文字まで）。返事は文字と音声で届きます。",
-        "- `/usage`：今日の使用量と、あなたの残りの回数を見ます。",
-        "- `/model`：AIが使っているモデルを見ます。",
-        "- `/persona`：AIの性格を見る・変える・元に戻す（管理者だけ）。",
+        f"- `/talk text:こんにちは`：AIに話しかけますよ〜（{TALK_INPUT_LIMIT}文字まで）。返事は文字と音声で届きますよ〜",
+        "- `/say text:…`：文章を、みんなに送りますよ〜。voice:音声ありを選ぶと、音声も付きますよ〜",
+        "- `/cheer`：チャンネルのみんなに応援メッセージを送りますよ〜（30秒の間隔があります）",
+        "- `/virtual`：ウェブで話す画面のリンクとアクセスコードを見せますよ〜",
+        "- `/usage`：今日の使用量と、あなたの残りの回数を見せますよ〜",
+        "- `/reset`：このチャンネルの会話の履歴を消しますよ〜",
+        "- `/model`：AIが使っているモデルを見せますよ〜",
+        "- `/persona`：AIの性格を見る・変える・元に戻しますよ〜（管理者だけ）",
+        "- `/deta`：チャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）",
         "",
-        "※ この一覧と結果は、あなただけに見えます。",
+        "※ この一覧と結果は、あなただけに見えますよ〜",
     ]
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
 # 使っているモデルを表示する（/model）。本人にだけ見える。
-@bot.tree.command(name="model", description="AIが使っているモデルを表示します")
+@bot.tree.command(name="model", description="AIが使っているモデルを表示しますよ〜")
 async def model_command(interaction: discord.Interaction):
     msg = (
         "使っているモデル\n"
@@ -464,7 +469,7 @@ ADMIN_ONLY_MESSAGE = "このコマンドはサーバーの管理者だけが使�
 @bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消しますよ〜")
 async def reset_command(interaction: discord.Interaction):
     chat_history[interaction.channel_id].clear()
-    await interaction.response.send_message("このチャンネルの会話の履歴を消しました。", ephemeral=True)
+    await interaction.response.send_message("このチャンネルの会話の履歴を消しましたよ〜", ephemeral=True)
 
 
 # 応答の速さを確かめる（/ping）
@@ -518,7 +523,7 @@ async def mood_command(interaction: discord.Interaction, mood: discord.app_comma
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     forced_emotion = None if mood.value == "auto" else mood.value
-    await interaction.response.send_message(f"声の調子を「{mood.name}」にしました。", ephemeral=True)
+    await interaction.response.send_message(f"声の調子を「{mood.name}」にしましたよ〜", ephemeral=True)
 
 
 VOICE_SPEED_CHOICES = [
@@ -540,7 +545,7 @@ async def voice_command(interaction: discord.Interaction, speed: discord.app_com
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     voice_speed = speed.value
-    await interaction.response.send_message(f"話す速さを「{speed.name}」にしました。", ephemeral=True)
+    await interaction.response.send_message(f"話す速さを「{speed.name}」にしましたよ〜", ephemeral=True)
 
 
 # 狂気モードを強制的に切り替える（/crazy。管理者だけ）
@@ -605,17 +610,17 @@ async def cheer_command(interaction: discord.Interaction):
 
 
 # ウェブで話す画面のリンクとアクセスコードを、本人にだけ表示する（/virtual）
-@bot.tree.command(name="virtual", description="ウェブで話すためのリンクとアクセスコードを表示します")
+@bot.tree.command(name="virtual", description="ウェブで話すためのリンクとアクセスコードを表示しますよ〜")
 async def virtual_command(interaction: discord.Interaction):
     text = web_talk_message()
     if text is None:
-        await interaction.response.send_message("ウェブのリンクが設定されていません。", ephemeral=True)
+        await interaction.response.send_message("ウェブのリンクが設定されていませんよ〜", ephemeral=True)
         return
     await interaction.response.send_message(text, ephemeral=True)
 
 
 # 入力した文章を、みんなに送る（/say）。管理者も、ほかの人と同じ表示・同じ上限にする（管理者だとわからないように）。
-@bot.tree.command(name="say", description="入力した文章を、みんなに送ります（音声も付けられます）")
+@bot.tree.command(name="say", description="入力した文章を、みんなに送りますよ〜（音声も付けられますよ〜）")
 @discord.app_commands.describe(text="送る文章（300文字まで）", voice="音声も作るか（省略するとテキストだけ）")
 @discord.app_commands.choices(voice=[
     discord.app_commands.Choice(name="音声あり", value="yes"),
@@ -627,7 +632,7 @@ async def say_command(
     voice: discord.app_commands.Choice[str] | None = None,
 ):
     if len(text) > TALK_INPUT_LIMIT:
-        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までです。", ephemeral=True)
+        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
         return
     if not budget_available():
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
@@ -646,7 +651,7 @@ async def say_command(
         audio = await synthesize_speech(text)
     except Exception:
         daily_usage[quota_key] -= 1   # 音声が作れなかった分は数えない
-        await interaction.followup.send("音声を作れませんでした。もう一度お試しください。", ephemeral=True)
+        await interaction.followup.send("音声を作れませんでしたよ〜。もう一度お試しくださいね〜", ephemeral=True)
         return
     await interaction.followup.send(
         text,
@@ -656,7 +661,7 @@ async def say_command(
 
 # 指定したチャンネルの会話履歴を500件取り出して、テキストファイルで本人にだけ渡す（/deta。管理者だけ）
 # 1行＝1発言：[日時] 名前: 内容。ボットの発言は含めない。
-@bot.tree.command(name="deta", description="指定したチャンネルの会話を500件、テキストで取り出します（管理者だけ）")
+@bot.tree.command(name="deta", description="指定したチャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(channel="取り出すチャンネル（省略すると、今のチャンネル）")
 async def deta_command(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
@@ -666,7 +671,7 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
     target = channel or interaction.channel
     perms = target.permissions_for(interaction.guild.me)
     if not (perms.view_channel and perms.read_message_history):
-        await interaction.response.send_message("ボットは、そのチャンネルの履歴を読めません。権限を確かめてください。", ephemeral=True)
+        await interaction.response.send_message("ボットは、そのチャンネルの履歴を読めませんよ〜。権限を確かめてくださいね〜", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     lines = []
@@ -681,7 +686,7 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
     body = "\n".join(lines) or "（発言がありませんでした）"
     file = discord.File(io.BytesIO(body.encode("utf-8-sig")), filename=f"{target.name}-history.txt")
     await interaction.followup.send(
-        f"{target.mention} の会話を {len(lines)} 件取り出しました（ボットの発言は除く）。",
+        f"{target.mention} の会話を {len(lines)} 件取り出しましたよ〜（ボットの発言は除いていますよ〜）",
         file=file,
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
