@@ -77,7 +77,7 @@
 | `CLUB_INFO` | 任意 | 部活の情報（活動内容や予定）。`club.txt` に書いても同じです |
 | `KNOWLEDGE_URL` | 任意 | Google ドライブのテキストファイルの共有リンク（読むだけ） |
 | `GEMINI_API_KEY` | `/code` に必要 | Google AI Studio のキー |
-| `GEMINI_CODE_MODEL` | 任意 | `/code` のモデル（既定は `gemini-2.5-flash`。新しい人は使えないことがあるので、使えるモデルを設定してください） |
+| `GEMINI_CODE_MODEL` | 任意 | `/code` のモデル（既定は `gemini-3.8-flash`） |
 | `CODE_PER_USER_DAILY` | 任意 | `/code` の1人1日の回数（既定 20） |
 | `CODE_GLOBAL_DAILY` | 任意 | `/code` の全体の1日の回数（既定 200） |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | 任意 | 使用量とページを保存する Upstash Redis |
