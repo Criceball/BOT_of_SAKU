@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import codegen, code_store, knowledge, usage_store
+from services import codegen, code_store, coding, knowledge, usage_store
+from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
 from groq import Groq
@@ -132,7 +133,7 @@ async def record_tokens(used: int, user_id: int | None = None) -> None:
     await usage_store.add(today, used, user_id)
 
 
-DEEP_TRIGGERS = ("詳しく教えて",)
+DEEP_TRIGGERS = ("詳しく教えて", "詳しく考えて", "詳しく答えて")
 
 
 def is_deep(text: str) -> bool:
@@ -200,7 +201,10 @@ async def on_message(message: discord.Message):
         bot.user in message.mentions
         and not message.content.startswith(bot.command_prefix)
     ):
-        await handle_mention(message)
+        natural = MENTION_PATTERN.sub("", message.content).strip()
+        # 添付ファイルがあるときは、変換として扱う（言葉の反応はしない）
+        if message.attachments or not await handle_natural_command(message, natural):
+            await handle_mention(message)
 
     await bot.process_commands(message)
 
@@ -603,18 +607,23 @@ cheer_last_sent: dict[int, float] = {}
 
 
 # チャンネルのみんなに応援メッセージを送る（/cheer）。全員に見える。連続で送れないように間隔を空ける。
-@bot.tree.command(name="cheer", description="チャンネルのみんなに応援メッセージを送りますよ〜！")
-async def cheer_command(interaction: discord.Interaction):
+def cheer_text(channel_id: int) -> str:
+    """応援メッセージの文章を返す。続けて送られないように、制限中は案内の文章を返す。"""
     now = time.monotonic()
-    last = cheer_last_sent.get(interaction.channel_id)
+    last = cheer_last_sent.get(channel_id)
     if last is not None and now - last < CHEER_COOLDOWN_SECONDS:
         wait = int(CHEER_COOLDOWN_SECONDS - (now - last))
-        await interaction.response.send_message(get_msg("cooldown", wait=wait), ephemeral=True)
-        return
-    cheer_last_sent[interaction.channel_id] = now
-    msg = random.choice(CHEER_MESSAGES)
+        return get_msg("cooldown", wait=wait)
+    cheer_last_sent[channel_id] = now
+    return f"## {random.choice(CHEER_MESSAGES)}"
+
+
+@bot.tree.command(name="cheer", description="チャンネルのみんなに応援メッセージを送りますよ〜！")
+async def cheer_command(interaction: discord.Interaction):
+    text = cheer_text(interaction.channel_id)
     await interaction.response.send_message(
-        f"## {msg}",
+        text,
+        ephemeral=not text.startswith("## "),
         allowed_mentions=discord.AllowedMentions.none(),
     )
 
@@ -742,49 +751,150 @@ bot.setup_hook = setup_hook
     request="作ってほしいページの内容",
     fix_of="直したいページのID（前に作ったページのリンクの最後の部分。直すときだけ入れますよ〜）",
 )
-async def code_command(interaction: discord.Interaction, request: str, fix_of: str | None = None):
-    await interaction.response.defer(thinking=True)
+async def build_code_page(user_id: int, request: str, fix_of: str | None) -> tuple[str, discord.File | None]:
+    """HTMLのページを作り、返す文章と .html ファイルを返す。失敗したときは理由の文章だけを返す。"""
     try:
-        keys = await code_store.take_quota(interaction.user.id)
+        keys = await code_store.take_quota(user_id)
     except code_store.QuotaError as e:
-        await interaction.followup.send(f"{e}")
-        return
+        return f"{e}", None
     if not budget_available():
         await code_store.refund_quota(keys)
-        await interaction.followup.send(get_msg("code_budget"))
-        return
+        return get_msg("code_budget"), None
 
     previous = None
     if fix_of:
         previous = await code_store.load_page(fix_of.rstrip("/").split("/")[-1])
         if previous is None:
             await code_store.refund_quota(keys)
-            await interaction.followup.send(get_msg("code_fix_missing"))
-            return
+            return get_msg("code_fix_missing"), None
 
     try:
         html_text, used = await codegen.generate_html(request, previous)
     except codegen.CodeGenError as e:
         await code_store.refund_quota(keys)
-        await interaction.followup.send(f"{e}")
-        return
+        return f"{e}", None
     except Exception as e:
         print(f"[/code] 作れませんでした: {e!r}", flush=True)
         await code_store.refund_quota(keys)
-        await interaction.followup.send(get_msg("code_failed"))
-        return
+        return get_msg("code_failed"), None
 
-    await record_tokens(used, interaction.user.id)
+    await record_tokens(used, user_id)
     page_id = await code_store.save_page(html_text)
     base = os.getenv("WEB_TALK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")
     link = f"{base}/view/{page_id}" if base else f"（ページID：{page_id}）"
     title = code_store.page_title(html_text)
     file = discord.File(io.BytesIO(html_text.encode("utf-8")), filename=f"{page_id}.html")
-    await interaction.followup.send(
-        get_msg("code_done", title=title, link=link, page_id=page_id),
-        file=file,
-        allowed_mentions=discord.AllowedMentions.none(),
-    )
+    return get_msg("code_done", title=title, link=link, page_id=page_id), file
+
+
+async def code_command(interaction: discord.Interaction, request: str, fix_of: str | None = None):
+    await interaction.response.defer(thinking=True)
+    text, file = await build_code_page(interaction.user.id, request, fix_of)
+    kwargs = {"file": file} if file else {}
+    await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+
+
+# 言葉で /code・/cheer を呼ぶ（メンションの本文で判断する）
+CODE_PATTERN = re.compile(r"(html|HTML).*(作って|作成して|制作して|書いて)|ゲーム.*(作って|作成して|制作して)")
+CHEER_TRIGGERS = ("励まして", "応援して", "元気づけて")
+
+
+def wants_code(text: str) -> bool:
+    return bool(CODE_PATTERN.search(text))
+
+
+def wants_cheer(text: str) -> bool:
+    return any(t in text for t in CHEER_TRIGGERS)
+
+
+# コードの相談（エラーの修正、動きの説明など）の言葉。強い言葉は単独で、弱い言葉は参照や コード があるときだけ使う
+CODING_STRONG_WORDS = ("エラー", "error", "Error", "バグ", "直して", "動かない", "コード", "関数", "プログラム", "python", "Python", "javascript", "JavaScript", "discord.py", "html", "HTML", "css", "CSS")
+CODING_WEAK_WORDS = ("なんで", "どうして", "なぜ", "説明して", "どういう意味")
+
+
+def wants_coding_help(text: str, has_reference: bool) -> bool:
+    if "```" in text:
+        return True
+    if any(w in text for w in CODING_STRONG_WORDS):
+        return True
+    return has_reference and any(w in text for w in CODING_WEAK_WORDS)
+
+
+async def referenced_text(message: discord.Message) -> str | None:
+    """返信先の発言の本文を返す（無ければ None）。"""
+    ref = message.reference
+    if ref is None or ref.message_id is None:
+        return None
+    target = ref.resolved if isinstance(ref.resolved, discord.Message) else None
+    if target is None:
+        try:
+            target = await message.channel.fetch_message(ref.message_id)
+        except discord.HTTPException:
+            return None
+    content = target.content.strip()
+    return content[:3000] if content else None
+
+
+async def build_coding_answer(user_id: int, question: str, referenced: str | None) -> tuple[list[str], discord.File | None]:
+    """コードの相談に答える。返す文章の一覧と、長いときの全文ファイルを返す。"""
+    try:
+        keys = await code_store.take_quota(user_id)
+    except code_store.QuotaError as e:
+        return [f"{e}"], None
+    if not budget_available():
+        await code_store.refund_quota(keys)
+        return [get_msg("code_budget")], None
+    try:
+        text, used, truncated = await coding.answer(question, referenced)
+    except GeminiError as e:
+        await code_store.refund_quota(keys)
+        return [str(e)], None
+    except Exception as e:
+        print(f"[コード相談] 答えられませんでした: {e!r}", flush=True)
+        await code_store.refund_quota(keys)
+        return [get_msg("code_failed")], None
+
+    await record_tokens(used, user_id)
+    if truncated:
+        text += "\n\n（長すぎて途中で切れましたよ〜。もう少し絞って聞いてくださいね〜）"
+    chunks = coding.split_for_discord(text)
+    if len(chunks) > 3:
+        file = discord.File(io.BytesIO(text.encode("utf-8")), filename="answer.md")
+        return [chunks[0], "続きは、ファイルにしましたよ〜"], file
+    return chunks, None
+
+
+async def send_coding_answer(message: discord.Message, chunks: list[str], file: discord.File | None) -> None:
+    for i, chunk in enumerate(chunks):
+        kwargs = {"file": file} if (file and i == len(chunks) - 1) else {}
+        if i == 0:
+            await message.reply(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+        else:
+            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+
+
+async def handle_natural_command(message: discord.Message, text: str) -> bool:
+    """メンションの言葉が /code・/cheer・コードの相談に当たれば処理して True を返す。"""
+    if wants_code(text):
+        if not text:
+            return False
+        async with message.channel.typing():
+            reply_text, file = await build_code_page(message.author.id, text, None)
+        kwargs = {"file": file} if file else {}
+        await message.reply(reply_text, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+        return True
+    if wants_cheer(text):
+        await message.channel.send(cheer_text(message.channel.id), allowed_mentions=discord.AllowedMentions.none())
+        return True
+    if not text:
+        return False
+    reference = await referenced_text(message)
+    if wants_coding_help(text, has_reference=reference is not None):
+        async with message.channel.typing():
+            chunks, file = await build_coding_answer(message.author.id, text, reference)
+        await send_coding_answer(message, chunks, file)
+        return True
+    return False
 
 
 # ボットの起動（main.py から import されたときは起動しない）
