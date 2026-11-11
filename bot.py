@@ -11,6 +11,7 @@ import discord
 
 import codegen
 import code_store
+from messages import get_msg
 import knowledge
 import usage_store
 from discord.ext import commands
@@ -63,7 +64,7 @@ HISTORY_CHAR_LIMIT = 300
 MAX_REPLY_TOKENS = 2048
 # 1日に使うトークンの上限。Groqの無料枠（1日20万）より手前で止める
 DAILY_TOKEN_BUDGET = 180_000
-BUDGET_MESSAGE = "もうあなたとは話したくない"
+BUDGET_MESSAGE = get_msg("budget_exhausted")
 # 音声にする返答の文字数上限（Fish Audioの料金は文字数で決まるため）
 TALK_CHAR_LIMIT = 300
 # Discordの1メッセージあたりの文字数上限
@@ -74,7 +75,7 @@ MAX_UPLOAD_FILES = 10
 # 1人1日の会話回数（メンションの会話と /talk の合計）。日付は日本時間で切り替える
 DAILY_LIMIT_PER_USER = 20
 JST = timezone(timedelta(hours=9))
-QUOTA_MESSAGE = f"今日の利用上限（1人1日{DAILY_LIMIT_PER_USER}回）に達しましたよ〜。明日また使えますよ〜"
+QUOTA_MESSAGE = get_msg("quota_reached", limit=DAILY_LIMIT_PER_USER)
 
 # 各クライアントの初期化
 groq_client = Groq(api_key=GROQ_API_KEY)
@@ -223,7 +224,7 @@ def web_talk_message() -> str | None:
 async def send_web_talk_dm(message: discord.Message) -> None:
     text = web_talk_message()
     if text is None:
-        await message.reply("ウェブのリンクが設定されていませんよ〜")
+        await message.reply(get_msg("web_link_missing"))
         return
     try:
         await message.author.send(text)
@@ -366,10 +367,10 @@ async def deep_command(interaction: discord.Interaction, text: str):
 
 async def run_talk(interaction: discord.Interaction, text: str, model: str) -> None:
     if not text:
-        await interaction.response.send_message("何か話しかけてくださいね〜", ephemeral=True)
+        await interaction.response.send_message(get_msg("talk_empty"), ephemeral=True)
         return
     if len(text) > TALK_INPUT_LIMIT:
-        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
+        await interaction.response.send_message(get_msg("talk_too_long", limit=TALK_INPUT_LIMIT), ephemeral=True)
         return
     if not budget_available():
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
@@ -401,7 +402,7 @@ async def run_talk(interaction: discord.Interaction, text: str, model: str) -> N
         )
     except Exception as e:
         refund_quota(quota_key)
-        await interaction.followup.send(f"エラーが発生しました: `{e}`", ephemeral=True)
+        await interaction.followup.send(get_msg("error_generic", error=e), ephemeral=True)
 
 
 PERSONA_MAX_CHARS = 1000
@@ -422,7 +423,7 @@ async def persona_command(
     text: str = "",
 ):
     if interaction.guild is None or not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("このコマンドはサーバーの管理者だけが使えます。", ephemeral=True)
+        await interaction.response.send_message(get_msg("admin_only_persona"), ephemeral=True)
         return
 
     if action.value == "show":
@@ -495,21 +496,21 @@ def is_admin(interaction: discord.Interaction) -> bool:
     return interaction.guild is not None and interaction.user.guild_permissions.administrator
 
 
-ADMIN_ONLY_MESSAGE = "このコマンドはサーバーの管理者だけが使えますよ〜"
+ADMIN_ONLY_MESSAGE = get_msg("admin_only")
 
 
 # このチャンネルの会話の履歴を消す（/reset）。結果は本人にだけ見える。
 @bot.tree.command(name="reset", description="このチャンネルの会話の履歴を消しますよ〜")
 async def reset_command(interaction: discord.Interaction):
     chat_history[interaction.channel_id].clear()
-    await interaction.response.send_message("このチャンネルの会話の履歴を消しましたよ〜", ephemeral=True)
+    await interaction.response.send_message(get_msg("reset_done"), ephemeral=True)
 
 
 # 応答の速さを確かめる（/ping）
 @bot.tree.command(name="ping", description="ボットが動いているか、応答の速さを確かめますよ〜")
 async def ping_command(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    await interaction.response.send_message(f"pong（応答 {ms}ms）", ephemeral=True)
+    await interaction.response.send_message(get_msg("pong", ms=ms), ephemeral=True)
 
 
 # 今日の利用状況（全体）を表示する（/stats。管理者だけ）
@@ -556,7 +557,7 @@ async def mood_command(interaction: discord.Interaction, mood: discord.app_comma
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     forced_emotion = None if mood.value == "auto" else mood.value
-    await interaction.response.send_message(f"声の調子を「{mood.name}」にしましたよ〜", ephemeral=True)
+    await interaction.response.send_message(get_msg("mood_set", name=mood.name), ephemeral=True)
 
 
 VOICE_SPEED_CHOICES = [
@@ -578,7 +579,7 @@ async def voice_command(interaction: discord.Interaction, speed: discord.app_com
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
     voice_speed = speed.value
-    await interaction.response.send_message(f"話す速さを「{speed.name}」にしましたよ〜", ephemeral=True)
+    await interaction.response.send_message(get_msg("speed_set", name=speed.name), ephemeral=True)
 
 
 # 狂気モードを強制的に切り替える（/crazy。管理者だけ）
@@ -632,7 +633,7 @@ async def cheer_command(interaction: discord.Interaction):
     last = cheer_last_sent.get(interaction.channel_id)
     if last is not None and now - last < CHEER_COOLDOWN_SECONDS:
         wait = int(CHEER_COOLDOWN_SECONDS - (now - last))
-        await interaction.response.send_message(f"少し待ってから送ってくださいね〜（あと {wait} 秒）", ephemeral=True)
+        await interaction.response.send_message(get_msg("cooldown", wait=wait), ephemeral=True)
         return
     cheer_last_sent[interaction.channel_id] = now
     msg = random.choice(CHEER_MESSAGES)
@@ -647,7 +648,7 @@ async def cheer_command(interaction: discord.Interaction):
 async def virtual_command(interaction: discord.Interaction):
     text = web_talk_message()
     if text is None:
-        await interaction.response.send_message("ウェブのリンクが設定されていませんよ〜", ephemeral=True)
+        await interaction.response.send_message(get_msg("web_link_missing"), ephemeral=True)
         return
     await interaction.response.send_message(text, ephemeral=True)
 
@@ -665,7 +666,7 @@ async def say_command(
     voice: discord.app_commands.Choice[str] | None = None,
 ):
     if len(text) > TALK_INPUT_LIMIT:
-        await interaction.response.send_message(f"{TALK_INPUT_LIMIT}文字までですよ〜", ephemeral=True)
+        await interaction.response.send_message(get_msg("talk_too_long", limit=TALK_INPUT_LIMIT), ephemeral=True)
         return
     if not budget_available():
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
@@ -684,7 +685,7 @@ async def say_command(
         audio = await synthesize_speech(text)
     except Exception:
         daily_usage[quota_key] -= 1   # 音声が作れなかった分は数えない
-        await interaction.followup.send("音声を作れませんでしたよ〜。もう一度お試しくださいね〜", ephemeral=True)
+        await interaction.followup.send(get_msg("voice_failed"), ephemeral=True)
         return
     await interaction.followup.send(
         text,
@@ -704,7 +705,7 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
     target = channel or interaction.channel
     perms = target.permissions_for(interaction.guild.me)
     if not (perms.view_channel and perms.read_message_history):
-        await interaction.response.send_message("ボットは、そのチャンネルの履歴を読めませんよ〜。権限を確かめてくださいね〜", ephemeral=True)
+        await interaction.response.send_message(get_msg("no_history_permission"), ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
     lines = []
@@ -719,7 +720,7 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
     body = "\n".join(lines) or "（発言がありませんでした）"
     file = discord.File(io.BytesIO(body.encode("utf-8-sig")), filename=f"{target.name}-history.txt")
     await interaction.followup.send(
-        f"{target.mention} の会話を {len(lines)} 件取り出しましたよ〜（ボットの発言は除いていますよ〜）",
+        get_msg("deta_done", mention=target.mention, count=len(lines)),
         file=file,
         ephemeral=True,
         allowed_mentions=discord.AllowedMentions.none(),
@@ -774,7 +775,7 @@ async def code_command(interaction: discord.Interaction, request: str, fix_of: s
         return
     if not budget_available():
         await code_store.refund_quota(keys)
-        await interaction.followup.send("今日のAIの使用量が上限に達したので、明日また試してくださいね〜")
+        await interaction.followup.send(get_msg("code_budget"))
         return
 
     previous = None
@@ -782,7 +783,7 @@ async def code_command(interaction: discord.Interaction, request: str, fix_of: s
         previous = await code_store.load_page(fix_of.rstrip("/").split("/")[-1])
         if previous is None:
             await code_store.refund_quota(keys)
-            await interaction.followup.send("直したいページが見つかりませんでした（期限が切れたかもしれませんよ〜）")
+            await interaction.followup.send(get_msg("code_fix_missing"))
             return
 
     try:
@@ -794,7 +795,7 @@ async def code_command(interaction: discord.Interaction, request: str, fix_of: s
     except Exception as e:
         print(f"[/code] 作れませんでした: {e!r}", flush=True)
         await code_store.refund_quota(keys)
-        await interaction.followup.send("うまく作れませんでした。時間をおいて試してくださいね〜")
+        await interaction.followup.send(get_msg("code_failed"))
         return
 
     await record_tokens(used, interaction.user.id)
@@ -804,7 +805,7 @@ async def code_command(interaction: discord.Interaction, request: str, fix_of: s
     title = code_store.page_title(html_text)
     file = discord.File(io.BytesIO(html_text.encode("utf-8")), filename=f"{page_id}.html")
     await interaction.followup.send(
-        f"「{title}」ができましたよ〜\n{link}\n直すときは、fix_of に `{page_id}` を入れてくださいね〜",
+        get_msg("code_done", title=title, link=link, page_id=page_id),
         file=file,
         allowed_mentions=discord.AllowedMentions.none(),
     )
