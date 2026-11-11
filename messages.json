@@ -1,0 +1,22 @@
+{
+  "budget_exhausted": "もうあなたとは話したくない",
+  "quota_reached": "今日の利用上限（1人1日{limit}回）に達しましたよ〜。明日また使えますよ〜",
+  "admin_only": "このコマンドはサーバーの管理者だけが使えますよ〜",
+  "admin_only_persona": "このコマンドはサーバーの管理者だけが使えます。",
+  "talk_empty": "何か話しかけてくださいね〜",
+  "talk_too_long": "{limit}文字までですよ〜",
+  "reset_done": "このチャンネルの会話の履歴を消しましたよ〜",
+  "pong": "pong（応答 {ms}ms）",
+  "mood_set": "声の調子を「{name}」にしましたよ〜",
+  "speed_set": "話す速さを「{name}」にしましたよ〜",
+  "cooldown": "少し待ってから送ってくださいね〜（あと {wait} 秒）",
+  "web_link_missing": "ウェブのリンクが設定されていませんよ〜",
+  "voice_failed": "音声を作れませんでしたよ〜。もう一度お試しくださいね〜",
+  "no_history_permission": "ボットは、そのチャンネルの履歴を読めませんよ〜。権限を確かめてくださいね〜",
+  "deta_done": "{mention} の会話を {count} 件取り出しましたよ〜（ボットの発言は除いていますよ〜）",
+  "error_generic": "エラーが発生しました: `{error}`",
+  "code_budget": "今日のAIの使用量が上限に達したので、明日また試してくださいね〜",
+  "code_fix_missing": "直したいページが見つかりませんでした（期限が切れたかもしれませんよ〜）",
+  "code_failed": "うまく作れませんでした。時間をおいて試してくださいね〜",
+  "code_done": "「{title}」ができましたよ〜\n{link}\n直すときは、fix_of に `{page_id}` を入れてくださいね〜"
+}
