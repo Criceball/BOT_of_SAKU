@@ -2,7 +2,7 @@
 
 環境変数:
 - GEMINI_API_KEY：Google AI Studio で作ったキー（無いと /code は使えない）
-- GEMINI_CODE_MODEL：使うモデル（既定は gemini-2.5-flash）
+- GEMINI_CODE_MODEL：使うモデル（既定は gemini-3.8-flash）
 """
 
 import logging
@@ -14,7 +14,7 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_CODE_MODEL = os.getenv("GEMINI_CODE_MODEL", "gemini-2.5-flash")
+GEMINI_CODE_MODEL = os.getenv("GEMINI_CODE_MODEL", "gemini-3.8-flash")
 MAX_OUTPUT_TOKENS = 16000
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
