@@ -9,17 +9,14 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
-import codegen
-import code_store
-from messages import get_msg
-import knowledge
-import usage_store
+from config.messages import get_list, get_msg
+from services import codegen, code_store, knowledge, usage_store
 from discord.ext import commands
 from dotenv import load_dotenv
 from groq import Groq
 from fishaudio import FishAudio
 
-from converter import (
+from services.converter import (
     FORMAT_ALIASES,
     MAX_PDF_PAGES,
     UnsupportedConversion,
@@ -600,28 +597,7 @@ async def crazy_command(interaction: discord.Interaction, state: discord.app_com
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-CHEER_MESSAGES = [
-    "はい！はい！あなた達は努力家ですよ〜",
-    "はい！はい！開発には挫折はつきものです！挫折なくして真の開発とは呼べませんよ〜",
-    "はい！はい！自分の体力APIを超過しないようにパッチを貼ってくださいね〜！健康は最大の武器ですよ〜",
-    "はい！はい！何も出来なかったことは決して無価値ではないですよ〜",
-    "はい！はい！はい！はい！はい！はい！は〜い！",
-    "はい！はい！人生のcommit履歴は決してclearにできないので、一つ一つを大切にpushしていってくださいね〜",
-    "はい！はい！進捗しろ--force",
-    "いけるね！",
-    "はい！はい！努力は報われるまで努力してから、努力と名乗りましょうね〜",
-    "はい！はい！現実的に困難な壁に到達したときは敢えて初心に戻りましょうね〜！見落としたものは戻るまで気づけませんよ〜",
-    "最高にハイってやつだァ！！！！",
-    "​​深き夜に 祈りを載せて　デプロイす　エラーが出て　台パン　くそが",
-    "はい！はい！受験勉強と開発を両立するのが難しいなら開発を優先してくださいね〜",
-    "はい！はい！完璧主義は開発に置いて諸刃の刃ですよ〜！現実との折り合いをつけていきましょうね〜",
-    "胸を張ってください。君たちは私の誇りです。",
-    "はい！はい！私が世界一ですよ〜！あなた達は世界二ですね〜",
-    "はい！はい！ハッキングなんて最後は運！神様の気まぐれ！",
-    "はい！はい！開発お疲れ様でしたよ〜！明日も頑張りましょう！",
-    "はい！はい！今日も開発してて偉いですよ！継続は力になります！",
-    "はい！はい！勉強もゆくゆくは開発の力になりますからね〜！",
-]
+CHEER_MESSAGES = get_list("cheer_messages")
 CHEER_COOLDOWN_SECONDS = 30
 cheer_last_sent: dict[int, float] = {}
 

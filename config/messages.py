@@ -11,7 +11,13 @@ import os
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "messages.json")
 
 with open(_PATH, encoding="utf-8") as _f:
-    _MESSAGES: dict[str, str] = json.load(_f)
+    _MESSAGES: dict = json.load(_f)
+
+
+def get_list(key: str) -> list[str]:
+    """文章の一覧（例：応援メッセージ）を返す。無いときは空のリスト。"""
+    value = _MESSAGES.get(key)
+    return list(value) if isinstance(value, list) else []
 
 
 def get_msg(key: str, **values) -> str:

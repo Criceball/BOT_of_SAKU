@@ -25,9 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-import knowledge  # noqa: E402
-import usage_store  # noqa: E402
-import code_store  # noqa: E402
+from services import code_store, knowledge, usage_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
     build_system_prompt,

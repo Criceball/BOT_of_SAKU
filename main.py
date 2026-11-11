@@ -16,7 +16,7 @@ from aiohttp import web
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bot as discord_bot  # noqa: E402
 from web_talk import server as web_server  # noqa: E402
-from code_store import add_routes as add_code_routes  # noqa: E402
+from services.code_store import add_routes as add_code_routes  # noqa: E402
 
 
 class _SkipHealthzLog(logging.Filter):
