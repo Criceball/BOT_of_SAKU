@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 import discord
 
+import codegen
+import code_store
 import knowledge
 import usage_store
 from discord.ext import commands
@@ -757,6 +759,56 @@ async def setup_hook() -> None:
 
 
 bot.setup_hook = setup_hook
+
+@bot.tree.command(name="code", description="HTMLのページを作りますよ〜（リンクで結果を見られますよ〜）")
+@discord.app_commands.describe(
+    request="作ってほしいページの内容",
+    fix_of="直したいページのID（前に作ったページのリンクの最後の部分。直すときだけ入れますよ〜）",
+)
+async def code_command(interaction: discord.Interaction, request: str, fix_of: str | None = None):
+    await interaction.response.defer(thinking=True)
+    try:
+        keys = await code_store.take_quota(interaction.user.id)
+    except code_store.QuotaError as e:
+        await interaction.followup.send(f"{e}")
+        return
+    if not budget_available():
+        await code_store.refund_quota(keys)
+        await interaction.followup.send("今日のAIの使用量が上限に達したので、明日また試してくださいね〜")
+        return
+
+    previous = None
+    if fix_of:
+        previous = await code_store.load_page(fix_of.rstrip("/").split("/")[-1])
+        if previous is None:
+            await code_store.refund_quota(keys)
+            await interaction.followup.send("直したいページが見つかりませんでした（期限が切れたかもしれませんよ〜）")
+            return
+
+    try:
+        html_text, used = await codegen.generate_html(request, previous)
+    except codegen.CodeGenError as e:
+        await code_store.refund_quota(keys)
+        await interaction.followup.send(f"{e}")
+        return
+    except Exception as e:
+        print(f"[/code] 作れませんでした: {e!r}", flush=True)
+        await code_store.refund_quota(keys)
+        await interaction.followup.send("うまく作れませんでした。時間をおいて試してくださいね〜")
+        return
+
+    await record_tokens(used, interaction.user.id)
+    page_id = await code_store.save_page(html_text)
+    base = os.getenv("WEB_TALK_URL") or os.getenv("RENDER_EXTERNAL_URL", "")
+    link = f"{base}/view/{page_id}" if base else f"（ページID：{page_id}）"
+    title = code_store.page_title(html_text)
+    file = discord.File(io.BytesIO(html_text.encode("utf-8")), filename=f"{page_id}.html")
+    await interaction.followup.send(
+        f"「{title}」ができましたよ〜\n{link}\n直すときは、fix_of に `{page_id}` を入れてくださいね〜",
+        file=file,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
 
 # ボットの起動（main.py から import されたときは起動しない）
 if __name__ == "__main__":
