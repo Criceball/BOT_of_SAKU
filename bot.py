@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import codegen, code_store, knowledge, usage_store
+from services import codegen, code_store, coding, knowledge, usage_store
+from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
 from groq import Groq
@@ -806,8 +807,74 @@ def wants_cheer(text: str) -> bool:
     return any(t in text for t in CHEER_TRIGGERS)
 
 
+# コードの相談（エラーの修正、動きの説明など）の言葉。強い言葉は単独で、弱い言葉は参照や コード があるときだけ使う
+CODING_STRONG_WORDS = ("エラー", "error", "Error", "バグ", "直して", "動かない", "コード", "関数", "プログラム", "python", "Python", "javascript", "JavaScript", "discord.py", "html", "HTML", "css", "CSS")
+CODING_WEAK_WORDS = ("なんで", "どうして", "なぜ", "説明して", "どういう意味")
+
+
+def wants_coding_help(text: str, has_reference: bool) -> bool:
+    if "```" in text:
+        return True
+    if any(w in text for w in CODING_STRONG_WORDS):
+        return True
+    return has_reference and any(w in text for w in CODING_WEAK_WORDS)
+
+
+async def referenced_text(message: discord.Message) -> str | None:
+    """返信先の発言の本文を返す（無ければ None）。"""
+    ref = message.reference
+    if ref is None or ref.message_id is None:
+        return None
+    target = ref.resolved if isinstance(ref.resolved, discord.Message) else None
+    if target is None:
+        try:
+            target = await message.channel.fetch_message(ref.message_id)
+        except discord.HTTPException:
+            return None
+    content = target.content.strip()
+    return content[:3000] if content else None
+
+
+async def build_coding_answer(user_id: int, question: str, referenced: str | None) -> tuple[list[str], discord.File | None]:
+    """コードの相談に答える。返す文章の一覧と、長いときの全文ファイルを返す。"""
+    try:
+        keys = await code_store.take_quota(user_id)
+    except code_store.QuotaError as e:
+        return [f"{e}"], None
+    if not budget_available():
+        await code_store.refund_quota(keys)
+        return [get_msg("code_budget")], None
+    try:
+        text, used, truncated = await coding.answer(question, referenced)
+    except GeminiError as e:
+        await code_store.refund_quota(keys)
+        return [str(e)], None
+    except Exception as e:
+        print(f"[コード相談] 答えられませんでした: {e!r}", flush=True)
+        await code_store.refund_quota(keys)
+        return [get_msg("code_failed")], None
+
+    await record_tokens(used, user_id)
+    if truncated:
+        text += "\n\n（長すぎて途中で切れましたよ〜。もう少し絞って聞いてくださいね〜）"
+    chunks = coding.split_for_discord(text)
+    if len(chunks) > 3:
+        file = discord.File(io.BytesIO(text.encode("utf-8")), filename="answer.md")
+        return [chunks[0], "続きは、ファイルにしましたよ〜"], file
+    return chunks, None
+
+
+async def send_coding_answer(message: discord.Message, chunks: list[str], file: discord.File | None) -> None:
+    for i, chunk in enumerate(chunks):
+        kwargs = {"file": file} if (file and i == len(chunks) - 1) else {}
+        if i == 0:
+            await message.reply(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+        else:
+            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
+
+
 async def handle_natural_command(message: discord.Message, text: str) -> bool:
-    """メンションの言葉が /code や /cheer に当たれば処理して True を返す。"""
+    """メンションの言葉が /code・/cheer・コードの相談に当たれば処理して True を返す。"""
     if wants_code(text):
         if not text:
             return False
@@ -818,6 +885,14 @@ async def handle_natural_command(message: discord.Message, text: str) -> bool:
         return True
     if wants_cheer(text):
         await message.channel.send(cheer_text(message.channel.id), allowed_mentions=discord.AllowedMentions.none())
+        return True
+    if not text:
+        return False
+    reference = await referenced_text(message)
+    if wants_coding_help(text, has_reference=reference is not None):
+        async with message.channel.typing():
+            chunks, file = await build_coding_answer(message.author.id, text, reference)
+        await send_coding_answer(message, chunks, file)
         return True
     return False
 
