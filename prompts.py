@@ -109,13 +109,16 @@ KNOWLEDGE_RULE = """\
 """
 
 
-def build_system_prompt(persona: str | None = None, extra: str | None = None) -> str:
+CRAZY_TEXT_RULE = "今は狂気モードです。いつもより興奮して、テンション高く、勢いのある言葉で答えてください。ただし、人を傷つける言葉や暴言は使わないでください。\n"
+
+
+def build_system_prompt(persona: str | None = None, extra: str | None = None, crazy: bool = False) -> str:
     # persona を渡すと、その性格で作る（Web とボットで、性格を分けるため）
     # extra は、質問に関係する参考情報（Google ドライブから探したもの）
     club = load_club_info()
     club_block = f"\n【部活の情報】\n{club}\n" if club else ""
     ref_block = f"\n【参考情報（質問に関係する部分）】\n{extra}\n" if extra else ""
-    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
+    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{CRAZY_TEXT_RULE if crazy else ''}{KNOWLEDGE_RULE}{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
