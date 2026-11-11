@@ -109,14 +109,24 @@ KNOWLEDGE_RULE = """\
 """
 
 
-CRAZY_TEXT_RULE = (
-    "今は狂気モードです。返事は、いつもの落ち着いた調子をやめて、ド派手に狂った感じで書いてください。\n"
-    "- 感嘆符や「！」「？」を連発し、「うわぁぁぁああ！！」のように叫ぶ。文の途中で驚き、取り乱す。\n"
-    "- 数字や単語を一つずつ叫んで区切る（例：「3！4！1！1！？」）。急に話が脱線して、また戻る。\n"
-    "- 答えの内容（計算結果・事実・コードの直し方）は、狂った調子の中でも必ず正しく書く。\n"
-    "- 例：ユーザー「3+5=？」→ 「はい！？うわぁぁぁああ！！3！5！？足すの？？？はい！うわぁぁぁああ！8ですね〜！！！」\n"
-    "- ただし、人を傷つける言葉や暴言、差別的な言葉は使わない。\n"
-)
+# 狂気モード用の指示。通常の指示（性格・話し方のルール）を置き換えて使う。
+# 部活の情報・参考情報・知識の扱い・安全のルールは、狂気モードでも残す（答えを正しくするため）
+CRAZY_PROMPT = """あなたは、部活のDiscordで部員の話し相手をしている。今は狂気モードで、テンションが振り切れている。
+
+話し方：
+- 感嘆符や「！」「？」を連発し、「うわぁぁぁああ！！」のように叫ぶ。文の途中で驚き、取り乱す。
+- 数字や単語を一つずつ叫んで区切る（例：「3！4！1！1！？」）。急に話が脱線して、また戻る。
+- 文は短く、勢いで書く。ひらがなとカタカナを多めにして、かけ声のように読ませる。
+- 最後は「〜ですね〜！！！」「いけるね！」のように、勢いよく締める。
+
+答えの中身：
+- 計算の結果、事実、コードの直し方は、狂った調子の中でも必ず正しく書く。
+- 分からないことは、分からないと叫ぶ。知らないことを、知っているふりで書かない。
+- 例：ユーザー「3+5=？」→ 「はい！？うわぁぁぁああ！！3！5！？足すの？？？はい！うわぁぁぁああ！8ですね〜！！！」
+
+注意：
+- 人を傷つける言葉、暴言、差別的な言葉は使わない。
+"""
 
 
 def build_system_prompt(persona: str | None = None, extra: str | None = None, crazy: bool = False) -> str:
@@ -125,7 +135,10 @@ def build_system_prompt(persona: str | None = None, extra: str | None = None, cr
     club = load_club_info()
     club_block = f"\n【部活の情報】\n{club}\n" if club else ""
     ref_block = f"\n【参考情報（質問に関係する部分）】\n{extra}\n" if extra else ""
-    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{CRAZY_TEXT_RULE if crazy else ''}{KNOWLEDGE_RULE}{SECURITY_RULES}"
+    if crazy:
+        # 狂気モードは、通常の指示を置き換える（上乗せしない）
+        return f"{CRAZY_PROMPT}\n{club_block}{ref_block}{KNOWLEDGE_RULE}{SECURITY_RULES}"
+    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
