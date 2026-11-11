@@ -27,6 +27,7 @@ REPO = ROOT.parent
 sys.path.insert(0, str(REPO))
 import knowledge  # noqa: E402
 import usage_store  # noqa: E402
+import code_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
     build_system_prompt,
@@ -363,6 +364,7 @@ app.router.add_get("/api/filler", filler)
 app.router.add_post("/api/check", check)
 app.router.add_get("/api/package", package)
 app.router.add_post("/api/reset", reset)
+code_store.add_routes(app)  # /code で作ったページの表示（/view/<id>、/raw/<id>）
 
 if __name__ == "__main__":
     if not ACCESS_KEY:
