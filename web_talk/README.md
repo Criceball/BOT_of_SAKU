@@ -12,15 +12,15 @@ Discord のボットを使わず、ブラウザでAIと話せる画面です。�
 - **Docker Command**：`python main.py`
 - **Health Check Path**：`/healthz`
 - **環境変数（Secret）**：
-  - `WEB_ACCESS_KEY`（**必須**。画面を開く人に教える合言葉です。これがないと画面は動きません）
-  - `GROQ_API_KEY`、`FISH_API_KEY`、`FISH_REFERENCE_ID`（会話と音声に必要です）
-  - `UPSTASH_REDIS_REST_URL` と `UPSTASH_REDIS_REST_TOKEN`（任意。トークンの使用量を、再起動しても消えないように保存します。Upstash の無料の Redis で作れます）
-  - `PERSONA`（任意。性格の設定。`persona.txt` の中身をそのまま貼ります）
-  - `WEB_PERSONA`（任意。画面だけの性格。無ければ `web_persona.txt` を使います）
-  - `CLUB_INFO`（任意。部活の活動内容や予定など。`club.txt` に書いても同じです）
-  - `KNOWLEDGE_URL`（任意。Google ドライブのテキストファイルの共有リンク。質問に関係する行だけを、AI が参考にします。読むだけです）
-  - `WEB_DEV_ACCESS_KEY`（任意。開発者用の合言葉。これで入ると、回数の制限がかかりません）
-  - `PACKAGE_URL`（任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンク。合言葉が合うと、最初に読み込みます）
+  - `WEB_ACCESS_KEY`：**必須**。画面を開く人に教える合言葉です。これがないと画面は動きません。
+  - `GROQ_API_KEY`、`FISH_API_KEY`、`FISH_REFERENCE_ID`：会話と音声に必要です。
+  - `UPSTASH_REDIS_REST_URL` と `UPSTASH_REDIS_REST_TOKEN`：任意。トークンの使用量を、再起動しても消えないように保存します。Upstash の無料の Redis で作れます。
+  - `PERSONA`：任意。性格の設定です。`persona.txt` の中身をそのまま貼ります。
+  - `WEB_PERSONA`：任意。画面だけの性格です。無ければ `web_persona.txt` を使います。
+  - `CLUB_INFO`：任意。部活の活動内容や予定などです。`club.txt` に書いても同じです。
+  - `KNOWLEDGE_URL`：任意。Google ドライブのテキストファイルの共有リンクです。質問に関係する行だけを、AI が参考にします。読むだけです。
+  - `WEB_DEV_ACCESS_KEY`：任意。開発者用の合言葉です。これで入ると、回数の制限がかかりません。
+  - `PACKAGE_URL`：任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンクです。合言葉が合うと、最初に読み込みます。
   - 任意：`GROQ_MODEL`、`FISH_MODEL`
 
 デプロイできたら、発行された URL（例：`https://xxxx.onrender.com`）を開きます。Render は HTTPS なので、Chrome の音声認識も使えます。
