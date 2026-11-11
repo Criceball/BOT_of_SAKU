@@ -1,31 +1,33 @@
-# 話せる画面（Discord の画面共有で使う）
+# 話せる画面（ウェブで話す画面）
 
-Discord のボットを使わず、ブラウザでAIと会話する画面です。サーバーは Render などに置き、自分の PC では Chrome を開くだけで使えます。その Chrome の画面を Discord で画面共有して、みんなに見せます。
+Discord のボットを使わず、ブラウザでAIと話せる画面です。サーバーは Render などに置き、画面を開く人は Chrome で URL を開くだけで使えます。その Chrome の画面を Discord で画面共有して、みんなに見せることもできます。
+
+ボット（`bot.py`）と同じプロセス（`main.py`）で動きます。`WEB_ACCESS_KEY` が無いと、画面は止まり、ボットだけが動きます。
 
 ## 1. Render にデプロイする
 
-Render の **Web Service** を、このリポジトリ（`feature/web-talk` ブランチ、または `main`）から作ります。
+ボットと同じ Web Service を使います（無料枠の時間を、1つにまとめるためです）。
 
-- **Runtime**：Docker（リポジトリ直下の Dockerfile を使う）
-- **Docker Command（起動コマンド）**：`python web_talk/server.py`（ボット用の `bot.py` ではなく、こちらを起動します）
-- **環境変数（Secret として設定）**：
-  - `GROQ_API_KEY`
-  - `FISH_API_KEY`
-  - `FISH_REFERENCE_ID`
-  - `PERSONA`（性格の設定。`persona.txt` の中身をそのまま貼る）
-  - `WEB_ACCESS_KEY`（**必須**。画面を開く人に教える合言葉です。これがないと起動しません）
-  - `UPSTASH_REDIS_REST_URL` と `UPSTASH_REDIS_REST_TOKEN`（任意。トークンの使用量を、再起動しても消えないように保存します。Upstash の無料の Redis で作れます）
-  - `CLUB_INFO`（任意。部活の活動内容や予定など。AI が、これをもとに答えます。`club.txt` に書いても同じです）
-  - `KNOWLEDGE_URL`（任意。Google ドライブのテキストファイルの共有リンク。質問に関係する行だけを、AI が参考にします。読むだけです）
-  - `WEB_DEV_ACCESS_KEY`（任意。開発者用の合言葉。これで入ると、回数の制限がかかりません）
-  - `PACKAGE_URL`（任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンク。合言葉が合うと、最初に読み込みます）
+- **Runtime**：Docker（リポジトリ直下の Dockerfile）
+- **Docker Command**：`python main.py`
+- **Health Check Path**：`/healthz`
+- **環境変数（Secret）**：
+  - `WEB_ACCESS_KEY`：**必須**。画面を開く人に教える合言葉です。これがないと画面は動きません。
+  - `GROQ_API_KEY`、`FISH_API_KEY`、`FISH_REFERENCE_ID`：会話と音声に必要です。
+  - `UPSTASH_REDIS_REST_URL` と `UPSTASH_REDIS_REST_TOKEN`：任意。トークンの使用量を、再起動しても消えないように保存します。Upstash の無料の Redis で作れます。
+  - `PERSONA`：任意。性格の設定です。`persona.txt` の中身をそのまま貼ります。
+  - `WEB_PERSONA`：任意。画面だけの性格です。無ければ `web_persona.txt` を使います。
+  - `CLUB_INFO`：任意。部活の活動内容や予定などです。`club.txt` に書いても同じです。
+  - `KNOWLEDGE_URL`：任意。Google ドライブのテキストファイルの共有リンクです。質問に関係する行だけを、AI が参考にします。読むだけです。
+  - `WEB_DEV_ACCESS_KEY`：任意。開発者用の合言葉です。これで入ると、回数の制限がかかりません。
+  - `PACKAGE_URL`：任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンクです。合言葉が合うと、最初に読み込みます。
   - 任意：`GROQ_MODEL`、`FISH_MODEL`
 
 デプロイできたら、発行された URL（例：`https://xxxx.onrender.com`）を開きます。Render は HTTPS なので、Chrome の音声認識も使えます。
 
 ## 2. スリープを防ぐ（任意）
 
-無料プランは 15 分間アクセスがないとスリープします。前に話した UptimeRobot で、URL（`/`）を 5 分ごとに確認すると、起きたままになります。
+無料プランは 15 分間アクセスがないとスリープします。UptimeRobot などで、URL（`/`）を 5 分ごとに確認すると、起きたままになります。
 
 ## 3. 使う
 
@@ -54,7 +56,7 @@ Render の **Web Service** を、このリポジトリ（`feature/web-talk` ブ�
 - **ヘッドホンを使ってください。** スピーカーの音を拾うと、自分の声とAIの声が混ざります。
 - 音声認識は Chrome の機能で、話した内容が Google に送られます。
 - 合言葉を知っている人だけが使えます。合言葉は、見せたい人だけに教えてください。
-- 1日のトークン上限（18万）を超えると、「もうあなたとは話したくない」と返します。
+- 1日のAIのトークン量の上限（18万トークン）を超えると、「もうあなたとは話したくない」と返します。
 - 1人（接続元のIPアドレスごと）が1日に話せるのは30回までです。開発者用のキーでは制限がありません。
 - 話せるのは、画面を開いた人だけです。複数人の声は拾えません。
 - 再起動すると、会話の履歴は消えます。
@@ -66,4 +68,4 @@ pip install -r requirements.txt
 python web_talk/server.py
 ```
 
-`.env` に `WEB_ACCESS_KEY` を入れると、`http://127.0.0.1:8000` で開けます。ここでは PC の中だけで動くので、外からは見えません。
+`.env` に `WEB_ACCESS_KEY` を入れると、`http://127.0.0.1:8000` で開けます。ここでは PC の中だけで動くので、外からは見えません。このときは、ウェブ画面だけが動きます（ボットは動きません）。
