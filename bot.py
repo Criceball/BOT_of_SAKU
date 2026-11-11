@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import codegen, code_store, coding, knowledge, usage_store
+from services import codegen, code_store, coding, knowledge, usage_store, web_search
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -53,6 +53,7 @@ FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 # 会話に使うGroqのモデル。llama-3.3-70b-versatile は2026年8月に停止されたため、後継を既定にする
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")            # 普段の会話（軽くて安い）
 GROQ_DEEP_MODEL = os.getenv("GROQ_DEEP_MODEL", "openai/gpt-oss-120b")  # 「詳しく教えて」や /deep で使う（賢い）
+GROQ_SEARCH_MODEL = os.getenv("GROQ_SEARCH_MODEL", "openai/gpt-oss-20b")  # 調べ物（/search）で使う
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
@@ -152,22 +153,19 @@ async def generate_reply(messages: list[dict], model: str | None = None) -> tupl
     return completion.choices[0].message.content, used
 
 
-# 管理者が /mood /voice /crazy で変える設定（再起動すると元に戻る）
-forced_emotion: str | None = None   # 声の調子（None は自動）
-voice_speed: float | None = None    # 通常の声の速さ（None は既定）
-force_crazy: bool = False           # 強制的に狂気モード
+# 管理者が /crazy で変える設定（再起動すると元に戻る）。ONの間は、メンションの返事がすべて狂います
+force_crazy: bool = False
 
 
 async def synthesize_speech(text: str, crazy: bool = False) -> bytes:
-    # 音声生成も同期APIのため、別スレッドで実行する。感情のタグを付けて声の調子を変える
-    speed = tts_speed(crazy) if crazy or voice_speed is None else voice_speed
+    # 音声生成も同期APIのため、別スレッドで実行する。狂気モードのときは、タグと速さを変える
     return await asyncio.to_thread(
         fish_client.tts.convert,
-        text=tts_prefix(crazy, forced_emotion) + text,
+        text=tts_prefix(crazy, None) + text,
         reference_id=FISH_REFERENCE_ID,
         format="mp3",
         model=FISH_MODEL,
-        speed=speed,
+        speed=tts_speed(crazy),
     )
 
 
@@ -317,7 +315,7 @@ async def handle_mention(message: discord.Message) -> None:
     async with message.channel.typing():
         try:
             reply_text, used_tokens = await generate_reply([
-                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
+                {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
                 *history,
             ], model=GROQ_DEEP_MODEL if is_deep(text) else GROQ_MODEL)
             await record_tokens(used_tokens, message.author.id)
@@ -338,7 +336,7 @@ async def handle_mention(message: discord.Message) -> None:
     if wants_voice_reply(text):
         # 「音声で話して」と言われたときは、返事も音声で付ける（失敗したら文字だけ）
         try:
-            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT))
+            audio_bytes = await synthesize_speech(cut_at_sentence(reply_text, TALK_CHAR_LIMIT), crazy=force_crazy)
             files.append(discord.File(io.BytesIO(audio_bytes), filename="reply.mp3"))
         except Exception:
             pass
@@ -385,7 +383,7 @@ async def run_talk(interaction: discord.Interaction, text: str, model: str) -> N
     try:
         # ① Groq APIでAIの返答テキストを生成
         raw_reply, used_tokens = await generate_reply([
-            {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text))},
+            {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
         ], model=model)
         await record_tokens(used_tokens, interaction.user.id)
@@ -532,59 +530,13 @@ async def stats_command(interaction: discord.Interaction):
         f"- トークン：{total_tokens:,} / {DAILY_TOKEN_BUDGET:,}\n"
         f"- 回数：{requests}回（{users}人）\n"
         f"- 会話中のチャンネル：{channels}\n"
-        f"- 声の調子：{forced_emotion or '自動'} ／ 速さ：{voice_speed or '既定'} ／ 狂気モード：{'ON' if force_crazy else 'OFF'}"
+        f"- 狂気モード：{'ON' if force_crazy else 'OFF'}"
     )
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-MOOD_CHOICES = [
-    discord.app_commands.Choice(name="自動（タグなし）", value="auto"),
-    discord.app_commands.Choice(name="喜び", value="happy"),
-    discord.app_commands.Choice(name="悲しみ", value="sad"),
-    discord.app_commands.Choice(name="怒り", value="angry"),
-    discord.app_commands.Choice(name="興奮", value="excited"),
-    discord.app_commands.Choice(name="落ち着き", value="calm"),
-]
-
-
-# 声の調子を決める（/mood。管理者だけ）
-@bot.tree.command(name="mood", description="AIの声の調子を決めますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
-@discord.app_commands.describe(mood="声の調子")
-@discord.app_commands.choices(mood=MOOD_CHOICES)
-async def mood_command(interaction: discord.Interaction, mood: discord.app_commands.Choice[str]):
-    global forced_emotion
-    if not is_admin(interaction):
-        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
-        return
-    forced_emotion = None if mood.value == "auto" else mood.value
-    await interaction.response.send_message(get_msg("mood_set", name=mood.name), ephemeral=True)
-
-
-VOICE_SPEED_CHOICES = [
-    discord.app_commands.Choice(name="ゆっくり（0.8倍）", value=0.8),
-    discord.app_commands.Choice(name="普通（1.0倍）", value=1.0),
-    discord.app_commands.Choice(name="速め（1.2倍）", value=1.2),
-    discord.app_commands.Choice(name="かなり速め（1.4倍）", value=1.4),
-]
-
-
-# 通常の声の速さを決める（/voice。管理者だけ。狂気モードの速さは変えません）
-@bot.tree.command(name="voice", description="AIの話す速さを決めますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
-@discord.app_commands.describe(speed="話す速さ")
-@discord.app_commands.choices(speed=VOICE_SPEED_CHOICES)
-async def voice_command(interaction: discord.Interaction, speed: discord.app_commands.Choice[float]):
-    global voice_speed
-    if not is_admin(interaction):
-        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
-        return
-    voice_speed = speed.value
-    await interaction.response.send_message(get_msg("speed_set", name=speed.name), ephemeral=True)
-
-
-# 狂気モードを強制的に切り替える（/crazy。管理者だけ）
-@bot.tree.command(name="crazy", description="狂気モードを強制的にON/OFFしますよ〜（管理者だけ）")
+# 狂気モードを切り替える（/crazy。管理者だけ）
+@bot.tree.command(name="crazy", description="狂気モードをON/OFFしますよ〜。ONの間は、メンションの返事がすべて狂いますよ〜（管理者だけ）")
 @discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(state="ON か OFF")
 @discord.app_commands.choices(state=[
@@ -864,7 +816,7 @@ async def build_coding_answer(user_id: int, question: str, referenced: str | Non
     return chunks, None
 
 
-async def send_coding_answer(message: discord.Message, chunks: list[str], file: discord.File | None) -> None:
+async def send_chunks_reply(message: discord.Message, chunks: list[str], file: discord.File | None) -> None:
     for i, chunk in enumerate(chunks):
         kwargs = {"file": file} if (file and i == len(chunks) - 1) else {}
         if i == 0:
@@ -886,15 +838,93 @@ async def handle_natural_command(message: discord.Message, text: str) -> bool:
     if wants_cheer(text):
         await message.channel.send(cheer_text(message.channel.id), allowed_mentions=discord.AllowedMentions.none())
         return True
+    if wants_search(text):
+        async with message.channel.typing():
+            chunks, file = await run_search(message.author.id, message.channel, text, wants_history(text))
+        await send_chunks_reply(message, chunks, file)
+        return True
     if not text:
         return False
     reference = await referenced_text(message)
     if wants_coding_help(text, has_reference=reference is not None):
         async with message.channel.typing():
             chunks, file = await build_coding_answer(message.author.id, text, reference)
-        await send_coding_answer(message, chunks, file)
+        await send_chunks_reply(message, chunks, file)
         return True
     return False
+
+
+# 調べ物（/search と「調べて」などの言葉）。Groq のウェブ検索、Drive の資料、最近の会話を使う
+SEARCH_TRIGGERS = ("調べて", "検索して", "ググって", "調べてほしい", "調べてくれ")
+HISTORY_WORDS = ("会話", "履歴", "さっき", "前に話", "話した", "今までの")
+
+
+def wants_search(text: str) -> bool:
+    return any(t in text for t in SEARCH_TRIGGERS)
+
+
+def wants_history(text: str) -> bool:
+    return any(w in text for w in HISTORY_WORDS)
+
+
+async def channel_history_text(channel, limit: int = 20) -> str | None:
+    """チャンネルの最近の人の発言を、古い順に並べて返す（ボットの発言は除く）。"""
+    lines = []
+    try:
+        async for m in channel.history(limit=limit):
+            if m.author.bot or not m.content:
+                continue
+            lines.append(f"{m.author.display_name}: {m.content[:200]}")
+    except discord.HTTPException:
+        return None
+    return "\n".join(reversed(lines)) or None
+
+
+async def run_search(user_id: int, channel, query: str, use_history: bool) -> tuple[list[str], discord.File | None]:
+    """調べて、答えの文章の一覧と長いときの全文ファイルを返す。"""
+    quota_key = take_quota(user_id)
+    if quota_key is None:
+        return [QUOTA_MESSAGE], None
+    if not budget_available():
+        refund_quota(quota_key)
+        return [BUDGET_MESSAGE], None
+    try:
+        knowledge_text = await knowledge.lookup(query)
+        history_text = await channel_history_text(channel) if use_history else None
+        completion = await asyncio.to_thread(
+            groq_client.chat.completions.create,
+            messages=web_search.build_messages(query, knowledge_text, history_text),
+            model=GROQ_SEARCH_MODEL,
+            tools=web_search.GROQ_SEARCH_TOOLS,
+            tool_choice="required",
+            reasoning_effort="low",
+            max_completion_tokens=MAX_REPLY_TOKENS,
+        )
+        text = web_search.clean_answer(completion.choices[0].message.content)
+        used = completion.usage.total_tokens if completion.usage else 0
+    except Exception as e:
+        print(f"[調べる] 失敗: {e!r}", flush=True)
+        refund_quota(quota_key)
+        return [get_msg("search_failed")], None
+
+    await record_tokens(used, user_id)
+    if not text:
+        return [get_msg("search_failed")], None
+    chunks = coding.split_for_discord(text)
+    if len(chunks) > 3:
+        file = discord.File(io.BytesIO(text.encode("utf-8")), filename="search.md")
+        return [chunks[0], "続きは、ファイルにしましたよ〜"], file
+    return chunks, None
+
+
+@bot.tree.command(name="search", description="ウェブで調べますよ〜（Drive の資料と、最近の会話も参考にしますよ〜）")
+@discord.app_commands.describe(query="調べたいこと")
+async def search_command(interaction: discord.Interaction, query: str):
+    await interaction.response.defer(thinking=True)
+    chunks, file = await run_search(interaction.user.id, interaction.channel, query, wants_history(query))
+    for i, chunk in enumerate(chunks):
+        kwargs = {"file": file} if (file and i == len(chunks) - 1) else {}
+        await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
 
 
 # ボットの起動（main.py から import されたときは起動しない）
