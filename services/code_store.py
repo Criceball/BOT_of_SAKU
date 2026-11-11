@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 from aiohttp import web
 
-import usage_store
+from services import usage_store
 
 log = logging.getLogger(__name__)
 
