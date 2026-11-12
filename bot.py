@@ -409,7 +409,6 @@ PERSONA_MAX_CHARS = 1000
 
 # 性格の確認・変更・リセット（サーバーの管理者だけが使える）。結果は本人にだけ見える。
 @bot.tree.command(name="persona", description="AIの性格を確認・変更・リセットしますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(action="確認・変更・リセットのどれか", text="変更するときの性格の文章")
 @discord.app_commands.choices(action=[
     discord.app_commands.Choice(name="確認", value="show"),
@@ -421,7 +420,7 @@ async def persona_command(
     action: discord.app_commands.Choice[str],
     text: str = "",
 ):
-    if interaction.guild is None or not interaction.user.guild_permissions.administrator:
+    if not is_admin(interaction):
         await interaction.response.send_message(get_msg("admin_only_persona"), ephemeral=True)
         return
 
@@ -491,8 +490,22 @@ async def model_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(msg, ephemeral=True)
 
+# 管理者用コマンドを使える役職の名前（カンマ区切りで ADMIN_ROLE_NAMES に変えられる）
+ADMIN_ROLE_NAMES = {
+    name.strip()
+    for name in os.getenv("ADMIN_ROLE_NAMES", "幹部,班長,副班長").split(",")
+    if name.strip()
+}
+
+
 def is_admin(interaction: discord.Interaction) -> bool:
-    return interaction.guild is not None and interaction.user.guild_permissions.administrator
+    """サーバーの管理者、または ADMIN_ROLE_NAMES の役職を持つ人かどうか。"""
+    if interaction.guild is None:
+        return False
+    member = interaction.user
+    if getattr(member, "guild_permissions", None) and member.guild_permissions.administrator:
+        return True
+    return any(role.name in ADMIN_ROLE_NAMES for role in getattr(member, "roles", []))
 
 
 ADMIN_ONLY_MESSAGE = get_msg("admin_only")
@@ -514,7 +527,6 @@ async def ping_command(interaction: discord.Interaction):
 
 # 今日の利用状況（全体）を表示する（/stats。管理者だけ）
 @bot.tree.command(name="stats", description="今日の利用状況を表示しますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
 async def stats_command(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
@@ -537,7 +549,6 @@ async def stats_command(interaction: discord.Interaction):
 
 # 狂気モードを切り替える（/crazy。管理者だけ）
 @bot.tree.command(name="crazy", description="狂気モードをON/OFFしますよ〜。ONの間は、メンションの返事がすべて狂いますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(state="ON か OFF")
 @discord.app_commands.choices(state=[
     discord.app_commands.Choice(name="ON", value="on"),
@@ -633,7 +644,6 @@ async def say_command(
 # 指定したチャンネルの会話履歴を500件取り出して、テキストファイルで本人にだけ渡す（/deta。管理者だけ）
 # 1行＝1発言：[日時] 名前: 内容。ボットの発言は含めない。
 @bot.tree.command(name="deta", description="指定したチャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）")
-@discord.app_commands.default_permissions(administrator=True)
 @discord.app_commands.describe(channel="取り出すチャンネル（省略すると、今のチャンネル）")
 async def deta_command(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
     if not is_admin(interaction):
