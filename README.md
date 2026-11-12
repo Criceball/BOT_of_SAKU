@@ -57,6 +57,7 @@
 | jpg / png / webp / gif / bmp | jpg / png / webp / gif / bmp / pdf |
 | pdf | jpg / png / webp / gif / bmp（ページごと）、txt（テキスト抽出） |
 | mp3 / wav / ogg / mp4 / gif | mp3 / wav / ogg / mp4 / gif |
+| mp4 | jpg / png / webp / bmp（最初の1フレームを画像にします） |
 
 添付ファイルは25MBまでです。
 
