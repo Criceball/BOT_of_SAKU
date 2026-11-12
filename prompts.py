@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 
+from services import bot_drive
+
 # ===== 性格・口調 =====
 # 公開リポジトリに含めないため、性格は persona.txt（.gitignore 済み）から読み込みます。
 # persona.txt が無いときは、この汎用の設定を使います。
@@ -51,7 +53,7 @@ WEB_PERSONA = load_web_persona()
 
 
 def web_persona() -> str:
-    return WEB_PERSONA or PERSONA
+    return bot_drive.get_text("web_persona.txt") or WEB_PERSONA or bot_drive.get_text("persona.txt") or PERSONA
 
 # ===== プロンプトインジェクション対策 =====
 SECURITY_RULES = """\
@@ -87,7 +89,8 @@ def reset_persona() -> None:
 
 
 def current_persona() -> str:
-    return _persona_override or PERSONA
+    # 優先順：/persona で変えた性格 → Google ドライブの persona.txt → 環境変数・persona.txt
+    return _persona_override or bot_drive.get_text("persona.txt") or PERSONA
 
 
 # 部活の情報（活動内容・予定など）。環境変数 CLUB_INFO か、club.txt（公開しない・Git に入れない）に書く
@@ -95,6 +98,9 @@ CLUB_INFO_PATH = Path(__file__).with_name("club.txt")
 
 
 def load_club_info() -> str:
+    drive_text = bot_drive.get_text("club.txt")
+    if drive_text:
+        return drive_text
     text = os.getenv("CLUB_INFO", "").strip()
     if not text and CLUB_INFO_PATH.exists():
         text = CLUB_INFO_PATH.read_text(encoding="utf-8").strip()

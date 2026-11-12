@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-from services import code_store, knowledge, usage_store  # noqa: E402
+from services import bot_drive, code_store, knowledge, usage_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
     build_system_prompt,
@@ -275,6 +275,10 @@ async def check(request: web.Request) -> web.Response:
 
 
 async def package(request: web.Request) -> web.StreamResponse:
+    # Google ドライブの bot フォルダの web_package.zip があれば、それを渡す（/load で読み直す）
+    drive_zip = bot_drive.get_bytes("web_package.zip")
+    if drive_zip:
+        return web.Response(body=drive_zip, content_type="application/zip")
     # Google ドライブの zip を、サーバー経由で渡す（ブラウザから直接取ると、Google が通信を止めるため）
     if not PACKAGE_URL:
         raise web.HTTPNotFound()

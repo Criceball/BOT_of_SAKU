@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import codegen, code_store, coding, knowledge, usage_store, web_search
+from services import bot_drive, codegen, code_store, coding, knowledge, usage_store, web_search
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -547,6 +547,22 @@ async def stats_command(interaction: discord.Interaction):
     await interaction.response.send_message(msg, ephemeral=True)
 
 
+# Google ドライブの bot フォルダを読み直す（/load）。管理者だけ
+@bot.tree.command(name="load", description="Google ドライブの bot フォルダを読み直しますよ〜（管理者だけ）")
+async def load_command(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    try:
+        sizes = await bot_drive.reload()
+    except bot_drive.BotDriveError as e:
+        await interaction.followup.send(get_msg("load_failed", error=str(e)), ephemeral=True)
+        return
+    files = "\n".join(f"- {name}：{size:,} バイト" for name, size in sizes.items()) or "（対象のファイルがありません）"
+    await interaction.followup.send(get_msg("load_done", files=files), ephemeral=True)
+
+
 # 狂気モードを切り替える（/crazy。管理者だけ）
 @bot.tree.command(name="crazy", description="狂気モードをON/OFFしますよ〜。ONの間は、メンションの返事がすべて狂いますよ〜（管理者だけ）")
 @discord.app_commands.describe(state="ON か OFF")
@@ -702,6 +718,13 @@ async def setup_hook() -> None:
     today = today_jst()
     daily_tokens[today] = (await usage_store.totals(today))["tokens"]
     # HTTP の応答は main.py（Web画面と同じポート）が受け持つので、ここでは立てない
+    # Google ドライブの bot フォルダを読む（失敗しても、ボットは起動する）
+    if bot_drive.configured():
+        try:
+            await bot_drive.reload()
+            print("[Drive] bot フォルダを読みました", flush=True)
+        except Exception as e:
+            print(f"[Drive] 読めませんでした: {e!r}", flush=True)
     # スラッシュコマンドを Discord に登録する（反映まで数分〜1時間かかることがある）
     await bot.tree.sync()
 
