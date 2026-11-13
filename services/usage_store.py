@@ -33,17 +33,19 @@ async def _run(commands: list[list]) -> list:
     return [item.get("result") for item in data]
 
 
-def _keys(day: str, user_id: int | None) -> list[str]:
+def _keys(day: str, user_id: int | None, model: str | None = None) -> list[str]:
     keys = [f"tok:{day}", f"req:{day}"]
     if user_id is not None:
         keys += [f"utok:{day}:{user_id}", f"ureq:{day}:{user_id}"]
+    if model is not None:
+        keys += [f"mtok:{day}:{model}"]
     return keys
 
 
-async def add(day: str, tokens: int, user_id: int | None = None) -> None:
-    """その日の合計と、その人の合計に、トークン数と回数を足す。"""
-    amounts = [tokens, 1, tokens, 1][: len(_keys(day, user_id))]
-    keys = _keys(day, user_id)
+async def add(day: str, tokens: int, user_id: int | None = None, model: str | None = None) -> None:
+    """その日の合計と、その人の合計、そのモデルの合計に、トークン数と回数を足す。"""
+    keys = _keys(day, user_id, model)
+    amounts = [tokens, 1, tokens, 1, tokens][: len(keys)]
     if enabled():
         try:
             commands = []
@@ -55,6 +57,18 @@ async def add(day: str, tokens: int, user_id: int | None = None) -> None:
             log.warning("使用量を保存できませんでした（メモリに残します）: %s", e)
     for key, amount in zip(keys, amounts):
         _memory[key] = _memory.get(key, 0) + amount
+
+
+async def model_total(day: str, model: str) -> int:
+    """そのモデルの、その日のトークン数。"""
+    key = f"mtok:{day}:{model}"
+    if enabled():
+        try:
+            results = await _run([["GET", key]])
+            return int(results[0] or 0)
+        except Exception as e:
+            log.warning("モデルの使用量を読めませんでした（メモリの値を使います）: %s", e)
+    return _memory.get(key, 0)
 
 
 async def totals(day: str, user_id: int | None = None) -> dict[str, int]:
