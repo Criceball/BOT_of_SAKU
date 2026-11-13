@@ -14,7 +14,7 @@ from services import bot_drive, codegen, code_store, coding, knowledge, usage_st
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
-from groq import Groq, RateLimitError
+from groq import Groq
 from fishaudio import FishAudio
 
 from services import deta_drive, deta_search
@@ -127,18 +127,33 @@ def today_jst() -> str:
     return datetime.now(JST).strftime("%Y-%m-%d")
 
 
-def budget_available() -> bool:
-    return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
+# モデルごとの、日ごとのトークン使用量（（日付, モデル名） → トークン数）。上限に達したら、次のモデルを使う
+model_daily: dict[tuple[str, str], int] = defaultdict(int)
 
 
-async def record_tokens(used: int, user_id: int | None = None) -> None:
+def model_available(model: str) -> bool:
+    return model_daily[(today_jst(), model)] < DAILY_TOKEN_BUDGET
+
+
+def budget_available(models: list[str] | None = None) -> bool:
+    # models を渡すと、その中のどれか1つでも上限に達していなければ使える
+    if models is None:
+        return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
+    return any(model_available(m) for m in models)
+
+
+async def record_tokens(used: int, user_id: int | None = None, model: str | None = None) -> None:
     today = today_jst()
     # 前日以前の記録は捨てる
     for old_day in [d for d in daily_tokens if d != today]:
         del daily_tokens[old_day]
+    for old_key in [k for k in model_daily if k[0] != today]:
+        del model_daily[old_key]
     daily_tokens[today] += used
+    if model is not None:
+        model_daily[(today, model)] += used
     # 再起動しても消えないように、保存する
-    await usage_store.add(today, used, user_id)
+    await usage_store.add(today, used, user_id, model)
 
 
 DEEP_TRIGGERS = ("詳しく教えて", "詳しく考えて", "詳しく答えて")
@@ -149,26 +164,24 @@ def is_deep(text: str) -> bool:
 
 
 async def groq_complete(models: list[str], **kwargs):
-    """モデルを順に試す。制限（429）に当たったら、次のモデルで答える。"""
-    last_error: Exception | None = None
-    for model in models:
-        try:
-            # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
-            return await asyncio.to_thread(groq_client.chat.completions.create, model=model, **kwargs)
-        except RateLimitError as e:
-            print(f"[Groq] {model} が上限に当たりました。次のモデルで試します", flush=True)
-            last_error = e
-    raise last_error
+    """上限に達していない、先頭のモデルで答える。(応答, 使ったモデル名) を返す。"""
+    usable = [m for m in models if model_available(m)]
+    if not usable:
+        raise RuntimeError("すべてのモデルが、今日の上限に達しています")
+    model = usable[0]
+    # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
+    completion = await asyncio.to_thread(groq_client.chat.completions.create, model=model, **kwargs)
+    return completion, model
 
 
-async def generate_reply(messages: list[dict], models: list[str] = NORMAL_CHAIN) -> tuple[str, int]:
-    completion = await groq_complete(
+async def generate_reply(messages: list[dict], models: list[str] = NORMAL_CHAIN) -> tuple[str, int, str]:
+    completion, model = await groq_complete(
         models,
         messages=messages,
         max_completion_tokens=MAX_REPLY_TOKENS,
     )
     used = completion.usage.total_tokens if completion.usage else 0
-    return completion.choices[0].message.content, used
+    return completion.choices[0].message.content, used, model
 
 
 # 管理者が /crazy で変える設定（再起動すると元に戻る）。ONの間は、メンションの返事がすべて狂います
@@ -314,7 +327,8 @@ async def handle_mention(message: discord.Message) -> None:
         await message.reply(f"長すぎますね〜（{MAX_CHAT_CHARS}文字までです）。")
         return
 
-    if not budget_available():
+    chain = DEEP_CHAIN if is_deep(text) else NORMAL_CHAIN
+    if not budget_available(chain):
         await message.reply(BUDGET_MESSAGE)
         return
 
@@ -332,11 +346,11 @@ async def handle_mention(message: discord.Message) -> None:
 
     async with message.channel.typing():
         try:
-            reply_text, used_tokens = await generate_reply([
+            reply_text, used_tokens, used_model = await generate_reply([
                 {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
                 *history,
-            ], models=DEEP_CHAIN if is_deep(text) else NORMAL_CHAIN)
-            await record_tokens(used_tokens, message.author.id)
+            ], models=chain)
+            await record_tokens(used_tokens, message.author.id, used_model)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
             refund_quota(quota_key)
@@ -389,7 +403,7 @@ async def run_talk(interaction: discord.Interaction, text: str, models: list[str
     if len(text) > TALK_INPUT_LIMIT:
         await interaction.response.send_message(get_msg("talk_too_long", limit=TALK_INPUT_LIMIT), ephemeral=True)
         return
-    if not budget_available():
+    if not budget_available(models):
         await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
         return
     quota_key = take_quota(interaction.user.id)
@@ -400,11 +414,11 @@ async def run_talk(interaction: discord.Interaction, text: str, models: list[str
     await interaction.response.defer(thinking=True)
     try:
         # ① Groq APIでAIの返答テキストを生成
-        raw_reply, used_tokens = await generate_reply([
+        raw_reply, used_tokens, used_model = await generate_reply([
             {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
         ], models=models)
-        await record_tokens(used_tokens, interaction.user.id)
+        await record_tokens(used_tokens, interaction.user.id, used_model)
         reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
         # 音声にする分は短くして、音声の料金を抑える
@@ -812,6 +826,9 @@ async def setup_hook() -> None:
     # 再起動の後も、今日の使用量を続きから数えられるように、保存された値を読み直す
     today = today_jst()
     daily_tokens[today] = (await usage_store.totals(today))["tokens"]
+    # モデルごとの使用量も、続きから数えられるように読み直す
+    for model in set(NORMAL_CHAIN + DEEP_CHAIN + SEARCH_CHAIN):
+        model_daily[(today, model)] = await usage_store.model_total(today, model)
     # HTTP の応答は main.py（Web画面と同じポート）が受け持つので、ここでは立てない
     # Google ドライブの bot フォルダを読む（失敗しても、ボットは起動する）
     if bot_drive.configured():
@@ -995,7 +1012,7 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
     quota_key = take_quota(user_id)
     if quota_key is None:
         return [QUOTA_MESSAGE], None
-    if not budget_available():
+    if not budget_available(SEARCH_CHAIN):
         refund_quota(quota_key)
         return [BUDGET_MESSAGE], None
     try:
@@ -1003,7 +1020,7 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
         # まず /deta の記録から、質問に関係する行を探す。見つかれば、記録だけで答える（ウェブは使わない）
         records_text = await deta_search.excerpts(query)
         if records_text:
-            completion = await groq_complete(
+            completion, used_model = await groq_complete(
                 SEARCH_CHAIN,
                 messages=web_search.build_record_messages(query, knowledge_text, records_text),
                 reasoning_effort="low",
@@ -1011,7 +1028,7 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
             )
         else:
             # 記録に無いときだけ、ウェブで調べる
-            completion = await groq_complete(
+            completion, used_model = await groq_complete(
                 SEARCH_CHAIN,
                 messages=web_search.build_messages(query, knowledge_text, None),
                 tools=web_search.GROQ_SEARCH_TOOLS,
@@ -1026,7 +1043,7 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
         refund_quota(quota_key)
         return [get_msg("search_failed")], None
 
-    await record_tokens(used, user_id)
+    await record_tokens(used, user_id, used_model)
     if not text:
         return [get_msg("search_failed")], None
     chunks = coding.split_for_discord(text)

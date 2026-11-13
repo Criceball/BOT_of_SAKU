@@ -81,7 +81,7 @@
 | `GROQ_MODEL` | 任意 | 普段の会話のモデル（既定は `openai/gpt-oss-20b`） |
 | `GROQ_DEEP_MODEL` | 任意 | 「詳しく教えて」や `/deep` のモデル（既定は `openai/gpt-oss-120b`） |
 | `GROQ_SEARCH_MODEL` | 任意 | 調べ物（`/search`）のモデル（既定は `openai/gpt-oss-20b`） |
-| `GROQ_FALLBACK_MODEL` | 任意 | 上のモデルが上限（429）に当たったときの予備（既定は `qwen/qwen3.8-27b`）。順番は、会話は 20b → qwen、詳しく答えるときは 120b → 20b → qwen |
+| `GROQ_FALLBACK_MODEL` | 任意 | モデルごとの1日のトークンが180,000に達したら、次の予備に切り替える（既定は `qwen/qwen3.8-27b`）。順番は、会話は 20b → qwen、詳しく答えるときは 120b → 20b → qwen |
 | `PERSONA` | 任意 | AIの性格（`persona.txt` の中身を貼ります） |
 | `CLUB_INFO` | 任意 | 部活の情報（活動内容や予定）。`club.txt` に書いても同じです |
 | `KNOWLEDGE_URL` | 任意 | Google ドライブのテキストファイルの共有リンク（読むだけ） |
