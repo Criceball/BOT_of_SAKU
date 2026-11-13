@@ -718,9 +718,7 @@ async def say_command(
     if len(text) > TALK_INPUT_LIMIT:
         await interaction.response.send_message(get_msg("talk_too_long", limit=TALK_INPUT_LIMIT), ephemeral=True)
         return
-    if not budget_available():
-        await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
-        return
+    # /say は AI を使わないので、AI の上限では止めない
     quota_key = take_quota(interaction.user.id)
     if quota_key is None:
         await interaction.response.send_message(QUOTA_MESSAGE, ephemeral=True)
@@ -854,9 +852,6 @@ async def build_code_page(user_id: int, request: str, fix_of: str | None) -> tup
         keys = await code_store.take_quota(user_id)
     except code_store.QuotaError as e:
         return f"{e}", None
-    if not budget_available():
-        await code_store.refund_quota(keys)
-        return get_msg("code_budget"), None
 
     previous = None
     if fix_of:
@@ -938,9 +933,6 @@ async def build_coding_answer(user_id: int, question: str, referenced: str | Non
         keys = await code_store.take_quota(user_id)
     except code_store.QuotaError as e:
         return [f"{e}"], None
-    if not budget_available():
-        await code_store.refund_quota(keys)
-        return [get_msg("code_budget")], None
     try:
         text, used, truncated = await coding.answer(question, referenced)
     except GeminiError as e:
