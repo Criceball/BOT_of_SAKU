@@ -23,7 +23,11 @@ from google.oauth2 import service_account
 
 log = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# drive.readonly: 共有されたフォルダの資料を読む。drive.file: ボットが作ったファイル（/deta）だけを読み書きする
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+]
 SUPPORTED_NAMES = {"persona.txt", "web_persona.txt", "club.txt", "knowledge.txt", "web_package.zip"}
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 
@@ -51,7 +55,8 @@ def get_bytes(name: str) -> bytes | None:
     return _files.get(name)
 
 
-def _access_token() -> str:
+def access_token() -> str:
+    """Google API を呼ぶためのアクセストークン（同期の処理。to_thread で呼ぶ）。"""
     info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
     creds.refresh(Request())
@@ -63,7 +68,7 @@ async def reload() -> dict[str, int]:
     if not configured():
         raise BotDriveError("Google ドライブの設定（BOT_DRIVE_FOLDER_ID と GOOGLE_SERVICE_ACCOUNT_JSON）がありません。")
     folder_id = os.environ["BOT_DRIVE_FOLDER_ID"].strip()
-    token = await asyncio.to_thread(_access_token)
+    token = await asyncio.to_thread(access_token)
     headers = {"Authorization": f"Bearer {token}"}
 
     timeout = aiohttp.ClientTimeout(total=300)
