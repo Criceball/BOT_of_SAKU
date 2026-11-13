@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from fishaudio import FishAudio
 
+from services.redact import mask_sensitive
 from services.converter import (
     FORMAT_ALIASES,
     MAX_PDF_PAGES,
@@ -752,7 +753,8 @@ async def deta_command(
     lines = []
     for message in picked:
         stamp = message.created_at.astimezone(JST).strftime("%Y-%m-%d %H:%M")
-        text = message.content.replace("\r", "").replace("\n", " / ")
+        # メールアドレス・パスワード・||伏せ字|| は、AIを使わずに伏せてから書き出す
+        text = mask_sensitive(message.content.replace("\r", "").replace("\n", " / "))
         for attachment in message.attachments:
             text += f" [添付: {attachment.filename}]"
         lines.append(f"[{stamp}] {message.author.display_name}: {text}")
