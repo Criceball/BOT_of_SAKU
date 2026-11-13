@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import bot_drive, codegen, code_store, coding, knowledge, usage_store, web_search
+from services import bot_drive, codegen, code_store, coding, knowledge, model_budget, usage_store, web_search
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -69,7 +69,6 @@ HISTORY_CHAR_LIMIT = 300
 # （gpt-ossは返事の前に思考の部分も書くので、少し余裕を持たせる）
 MAX_REPLY_TOKENS = 2048
 # 1日に使うトークンの上限。Groqの無料枠（1日20万）より手前で止める
-DAILY_TOKEN_BUDGET = 180_000
 BUDGET_MESSAGE = get_msg("budget_exhausted")
 # 音声にする返答の文字数上限（Fish Audioの料金は文字数で決まるため）
 TALK_CHAR_LIMIT = 300
@@ -127,19 +126,9 @@ def today_jst() -> str:
     return datetime.now(JST).strftime("%Y-%m-%d")
 
 
-# モデルごとの、日ごとのトークン使用量（（日付, モデル名） → トークン数）。上限に達したら、次のモデルを使う
-model_daily: dict[tuple[str, str], int] = defaultdict(int)
-
-
-def model_available(model: str) -> bool:
-    return model_daily[(today_jst(), model)] < DAILY_TOKEN_BUDGET
-
-
-def budget_available(models: list[str] | None = None) -> bool:
-    # models を渡すと、その中のどれか1つでも上限に達していなければ使える
-    if models is None:
-        return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
-    return any(model_available(m) for m in models)
+def budget_available(models: list[str]) -> bool:
+    # どれか1つでも上限に達していなければ使える（上限はモデルごとに数える）
+    return model_budget.any_available(models)
 
 
 async def record_tokens(used: int, user_id: int | None = None, model: str | None = None) -> None:
@@ -147,13 +136,12 @@ async def record_tokens(used: int, user_id: int | None = None, model: str | None
     # 前日以前の記録は捨てる
     for old_day in [d for d in daily_tokens if d != today]:
         del daily_tokens[old_day]
-    for old_key in [k for k in model_daily if k[0] != today]:
-        del model_daily[old_key]
     daily_tokens[today] += used
     if model is not None:
-        model_daily[(today, model)] += used
-    # 再起動しても消えないように、保存する
-    await usage_store.add(today, used, user_id, model)
+        # モデルごとの数（ボットとウェブ画面で共有）。再起動しても消えないように保存する
+        await model_budget.record(used, model, user_id)
+    else:
+        await usage_store.add(today, used, user_id)
 
 
 DEEP_TRIGGERS = ("詳しく教えて", "詳しく考えて", "詳しく答えて")
@@ -165,10 +153,9 @@ def is_deep(text: str) -> bool:
 
 async def groq_complete(models: list[str], **kwargs):
     """上限に達していない、先頭のモデルで答える。(応答, 使ったモデル名) を返す。"""
-    usable = [m for m in models if model_available(m)]
-    if not usable:
+    model = model_budget.pick(models)
+    if model is None:
         raise RuntimeError("すべてのモデルが、今日の上限に達しています")
-    model = usable[0]
     # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
     completion = await asyncio.to_thread(groq_client.chat.completions.create, model=model, **kwargs)
     return completion, model
@@ -533,7 +520,7 @@ async def usage_command(interaction: discord.Interaction):
     mine = daily_usage.get((interaction.user.id, today), 0)
     msg = (
         "今日の使用量\n"
-        f"- 全体のトークン：{stored['tokens']:,} / {DAILY_TOKEN_BUDGET:,}（{stored['requests']}回）\n"
+        f"- 全体のトークン：{stored['tokens']:,}（{stored['requests']}回）\n"
         f"- あなたのトークン：{stored['user_tokens']:,}（{stored['user_requests']}回）\n"
         f"- あなたの回数：{mine} / {DAILY_LIMIT_PER_USER}"
     )
@@ -625,7 +612,7 @@ async def stats_command(interaction: discord.Interaction):
     channels = sum(1 for history in chat_history.values() if history)
     msg = (
         "今日の利用状況（全体）\n"
-        f"- トークン：{total_tokens:,} / {DAILY_TOKEN_BUDGET:,}\n"
+        f"- トークン：{total_tokens:,}\n"
         f"- 回数：{requests}回（{users}人）\n"
         f"- 会話中のチャンネル：{channels}\n"
         f"- 狂気モード：{'ON' if force_crazy else 'OFF'}"
@@ -718,9 +705,7 @@ async def say_command(
     if len(text) > TALK_INPUT_LIMIT:
         await interaction.response.send_message(get_msg("talk_too_long", limit=TALK_INPUT_LIMIT), ephemeral=True)
         return
-    if not budget_available():
-        await interaction.response.send_message(BUDGET_MESSAGE, ephemeral=True)
-        return
+    # /say は AI を使わないので、AI の上限では止めない
     quota_key = take_quota(interaction.user.id)
     if quota_key is None:
         await interaction.response.send_message(QUOTA_MESSAGE, ephemeral=True)
@@ -827,8 +812,7 @@ async def setup_hook() -> None:
     today = today_jst()
     daily_tokens[today] = (await usage_store.totals(today))["tokens"]
     # モデルごとの使用量も、続きから数えられるように読み直す
-    for model in set(NORMAL_CHAIN + DEEP_CHAIN + SEARCH_CHAIN):
-        model_daily[(today, model)] = await usage_store.model_total(today, model)
+    await model_budget.load_today(NORMAL_CHAIN + DEEP_CHAIN + SEARCH_CHAIN)
     # HTTP の応答は main.py（Web画面と同じポート）が受け持つので、ここでは立てない
     # Google ドライブの bot フォルダを読む（失敗しても、ボットは起動する）
     if bot_drive.configured():
@@ -854,9 +838,6 @@ async def build_code_page(user_id: int, request: str, fix_of: str | None) -> tup
         keys = await code_store.take_quota(user_id)
     except code_store.QuotaError as e:
         return f"{e}", None
-    if not budget_available():
-        await code_store.refund_quota(keys)
-        return get_msg("code_budget"), None
 
     previous = None
     if fix_of:
@@ -938,9 +919,6 @@ async def build_coding_answer(user_id: int, question: str, referenced: str | Non
         keys = await code_store.take_quota(user_id)
     except code_store.QuotaError as e:
         return [f"{e}"], None
-    if not budget_available():
-        await code_store.refund_quota(keys)
-        return [get_msg("code_budget")], None
     try:
         text, used, truncated = await coding.answer(question, referenced)
     except GeminiError as e:
