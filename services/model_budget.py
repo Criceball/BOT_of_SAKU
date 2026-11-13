@@ -33,6 +33,10 @@ def model_limit(model: str) -> int:
     return int(MODEL_DAILY_TOKENS.get(model, DEFAULT_MODEL_DAILY_TOKENS) * LIMIT_RATIO)
 
 
+def used_today(model: str) -> int:
+    return _counts[(today(), model)]
+
+
 def available(model: str) -> bool:
     return _counts[(today(), model)] < model_limit(model)
 

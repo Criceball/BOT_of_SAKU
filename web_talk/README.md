@@ -21,7 +21,7 @@ Discord のボットを使わず、ブラウザでAIと話せる画面です。�
   - `KNOWLEDGE_URL`：任意。Google ドライブのテキストファイルの共有リンクです。質問に関係する行だけを、AI が参考にします。読むだけです。
   - `WEB_DEV_ACCESS_KEY`：任意。開発者用の合言葉です。これで入ると、回数の制限がかかりません。
   - `PACKAGE_URL`：任意。Google ドライブに置いた言葉・動画のパッケージ zip の共有リンクです。合言葉が合うと、最初に読み込みます。
-  - 任意：`GROQ_MODEL`、`FISH_MODEL`
+  - 任意：`GROQ_MODEL`、`GROQ_FALLBACK_MODEL`、`FISH_MODEL`。モデルの上限（Groq の上限の9割）に達したら、予備のモデルに切り替わります
 
 デプロイできたら、発行された URL（例：`https://xxxx.onrender.com`）を開きます。Render は HTTPS なので、Chrome の音声認識も使えます。
 
