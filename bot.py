@@ -69,7 +69,18 @@ HISTORY_CHAR_LIMIT = 300
 # （gpt-ossは返事の前に思考の部分も書くので、少し余裕を持たせる）
 MAX_REPLY_TOKENS = 2048
 # 1日に使うトークンの上限。Groqの無料枠（1日20万）より手前で止める
-DAILY_TOKEN_BUDGET = 180_000
+# モデルごとの1日のトークン上限（Groq の無料枠の1日の上限）。その9割に達したら、そのモデルは使わず、次のモデルへ
+MODEL_DAILY_TOKENS = {
+    "openai/gpt-oss-20b": 200_000,
+    "openai/gpt-oss-120b": 200_000,
+    "qwen/qwen3.8-27b": 200_000,
+}
+DEFAULT_MODEL_DAILY_TOKENS = 200_000
+MODEL_LIMIT_RATIO = 0.9
+
+
+def model_limit(model: str) -> int:
+    return int(MODEL_DAILY_TOKENS.get(model, DEFAULT_MODEL_DAILY_TOKENS) * MODEL_LIMIT_RATIO)
 BUDGET_MESSAGE = get_msg("budget_exhausted")
 # 音声にする返答の文字数上限（Fish Audioの料金は文字数で決まるため）
 TALK_CHAR_LIMIT = 300
@@ -132,13 +143,11 @@ model_daily: dict[tuple[str, str], int] = defaultdict(int)
 
 
 def model_available(model: str) -> bool:
-    return model_daily[(today_jst(), model)] < DAILY_TOKEN_BUDGET
+    return model_daily[(today_jst(), model)] < model_limit(model)
 
 
-def budget_available(models: list[str] | None = None) -> bool:
-    # models を渡すと、その中のどれか1つでも上限に達していなければ使える
-    if models is None:
-        return daily_tokens[today_jst()] < DAILY_TOKEN_BUDGET
+def budget_available(models: list[str]) -> bool:
+    # どれか1つでも上限に達していなければ使える（上限はモデルごとに数える）
     return any(model_available(m) for m in models)
 
 
@@ -533,7 +542,7 @@ async def usage_command(interaction: discord.Interaction):
     mine = daily_usage.get((interaction.user.id, today), 0)
     msg = (
         "今日の使用量\n"
-        f"- 全体のトークン：{stored['tokens']:,} / {DAILY_TOKEN_BUDGET:,}（{stored['requests']}回）\n"
+        f"- 全体のトークン：{stored['tokens']:,}（{stored['requests']}回）\n"
         f"- あなたのトークン：{stored['user_tokens']:,}（{stored['user_requests']}回）\n"
         f"- あなたの回数：{mine} / {DAILY_LIMIT_PER_USER}"
     )
@@ -625,7 +634,7 @@ async def stats_command(interaction: discord.Interaction):
     channels = sum(1 for history in chat_history.values() if history)
     msg = (
         "今日の利用状況（全体）\n"
-        f"- トークン：{total_tokens:,} / {DAILY_TOKEN_BUDGET:,}\n"
+        f"- トークン：{total_tokens:,}\n"
         f"- 回数：{requests}回（{users}人）\n"
         f"- 会話中のチャンネル：{channels}\n"
         f"- 狂気モード：{'ON' if force_crazy else 'OFF'}"
