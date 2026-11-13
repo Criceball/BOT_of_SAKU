@@ -6,3 +6,5 @@ groq==1.7.0
 fish-audio-sdk==1.4.0
 pillow==13.0.0
 pymupdf==2.1
+google-auth==2.38.0
+requests==2.32.3

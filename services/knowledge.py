@@ -11,6 +11,8 @@ import time
 
 import aiohttp
 
+from services import bot_drive
+
 log = logging.getLogger(__name__)
 
 KNOWLEDGE_URL = os.getenv("KNOWLEDGE_URL", "")
@@ -52,6 +54,10 @@ async def _download(url: str) -> str:
 
 
 async def load_lines() -> list[str]:
+    # Google ドライブの bot フォルダの knowledge.txt があれば、それを使う（/load で読み直す）
+    drive_text = bot_drive.get_text("knowledge.txt")
+    if drive_text:
+        return [line.strip() for line in drive_text.splitlines() if line.strip()]
     if not KNOWLEDGE_URL:
         return []
     if time.monotonic() - _cache["at"] < CACHE_SECONDS and _cache["lines"]:

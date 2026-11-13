@@ -88,11 +88,40 @@
 | `CODE_PER_USER_DAILY` | 任意 | `/code` の1人1日の回数（既定 20） |
 | `CODE_GLOBAL_DAILY` | 任意 | `/code` の全体の1日の回数（既定 200） |
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | 任意 | 使用量とページを保存する Upstash Redis |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | 任意 | Google ドライブの bot フォルダを読むサービスアカウントの鍵（JSON の中身をそのまま） |
+| `BOT_DRIVE_FOLDER_ID` | 任意 | bot 専用フォルダの ID（フォルダの URL の最後の部分） |
 | `ADMIN_ROLE_NAMES` | 任意 | 管理者用コマンドを使える役職の名前（既定は `幹部,班長,副班長`） |
 | `WEB_ACCESS_KEY` | ウェブ画面に必要 | ウェブで話す画面の合言葉。無いと画面は止まり、ボットだけ動きます |
 | `WEB_DEV_ACCESS_KEY` | 任意 | 開発者用の合言葉（回数制限がかかりません） |
 | `WEB_TALK_URL` | 任意 | 画面のURL（無ければ Render が入れる `RENDER_EXTERNAL_URL` を使います） |
 | `PACKAGE_URL` | 任意 | ウェブ画面の言葉・動画のパッケージ（Google ドライブの zip） |
+
+## Google ドライブの bot フォルダ（設定と資料の置き場所）
+
+設定と資料を、Google ドライブの bot 専用フォルダに置くと、コードを直さずに変えられます。読むのは、サービスアカウント（読み取りだけの専用アカウント）です。
+
+**準備**
+1. Google Cloud で、プロジェクトを作り、「Google Drive API」を有効にする。
+2. サービスアカウントを作り、鍵（JSON）を作成する。JSON の中身を、環境変数 `GOOGLE_SERVICE_ACCOUNT_JSON` に入れる。
+3. Google ドライブに bot 専用フォルダを作り、サービスアカウントのメールアドレスを「閲覧者」として共有する。
+4. フォルダの URL の最後の部分（ID）を、`BOT_DRIVE_FOLDER_ID` に入れる。
+
+**フォルダの中のファイル（名前を変えないでください）**
+
+| ファイル名 | 中身 |
+| --- | --- |
+| `persona.txt` | ボットの性格 |
+| `web_persona.txt` | ウェブ画面の性格（無ければ `persona.txt` を使う） |
+| `club.txt` | 部活の情報 |
+| `knowledge.txt` | 参考資料（質問に関係する行だけを使う） |
+| `web_package.zip` | ウェブ画面の言葉・動画のパッケージ |
+
+テキストは、Google ドキュメントではなく、テキストファイル（.txt）としてアップロードしてください。
+
+**読み直し**
+- 起動のときに読みます。
+- フォルダを直したら、Discord で `/load` を実行すると、すぐ読み直します（管理者だけ）。
+- Drive のファイルが、環境変数や同じ名前のローカルファイルより優先されます。
 
 ## ファイルの場所
 
