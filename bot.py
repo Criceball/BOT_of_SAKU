@@ -14,7 +14,7 @@ from services import bot_drive, codegen, code_store, coding, knowledge, usage_st
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
-from groq import Groq
+from groq import Groq, RateLimitError
 from fishaudio import FishAudio
 
 from services import deta_drive, deta_search
@@ -56,6 +56,11 @@ FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")            # 普段の会話（軽くて安い）
 GROQ_DEEP_MODEL = os.getenv("GROQ_DEEP_MODEL", "openai/gpt-oss-120b")  # 「詳しく教えて」や /deep で使う（賢い）
 GROQ_SEARCH_MODEL = os.getenv("GROQ_SEARCH_MODEL", "openai/gpt-oss-20b")  # 調べ物（/search）で使う
+GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.8-27b")  # 上のモデルの1日・1分の上限に当たったときの予備
+# 上から順に試す。制限（429）に当たったら、次のモデルで答える
+NORMAL_CHAIN = [GROQ_MODEL, GROQ_FALLBACK_MODEL]
+DEEP_CHAIN = [GROQ_DEEP_MODEL, GROQ_MODEL, GROQ_FALLBACK_MODEL]
+SEARCH_CHAIN = [GROQ_SEARCH_MODEL, GROQ_FALLBACK_MODEL]
 # メンションでの会話で、チャンネルごとに保持するメッセージ数の上限
 HISTORY_LIMIT = 3
 # 履歴の返答1件あたりの文字数上限（入力トークンを抑えて、Groqの1分・1日の上限を守るため）
@@ -143,12 +148,23 @@ def is_deep(text: str) -> bool:
     return any(t in text for t in DEEP_TRIGGERS)
 
 
-async def generate_reply(messages: list[dict], model: str | None = None) -> tuple[str, int]:
-    # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
-    completion = await asyncio.to_thread(
-        groq_client.chat.completions.create,
+async def groq_complete(models: list[str], **kwargs):
+    """モデルを順に試す。制限（429）に当たったら、次のモデルで答える。"""
+    last_error: Exception | None = None
+    for model in models:
+        try:
+            # Groqの呼び出しは同期APIのため、別スレッドで実行してイベントループを止めない
+            return await asyncio.to_thread(groq_client.chat.completions.create, model=model, **kwargs)
+        except RateLimitError as e:
+            print(f"[Groq] {model} が上限に当たりました。次のモデルで試します", flush=True)
+            last_error = e
+    raise last_error
+
+
+async def generate_reply(messages: list[dict], models: list[str] = NORMAL_CHAIN) -> tuple[str, int]:
+    completion = await groq_complete(
+        models,
         messages=messages,
-        model=model or GROQ_MODEL,
         max_completion_tokens=MAX_REPLY_TOKENS,
     )
     used = completion.usage.total_tokens if completion.usage else 0
@@ -319,7 +335,7 @@ async def handle_mention(message: discord.Message) -> None:
             reply_text, used_tokens = await generate_reply([
                 {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
                 *history,
-            ], model=GROQ_DEEP_MODEL if is_deep(text) else GROQ_MODEL)
+            ], models=DEEP_CHAIN if is_deep(text) else NORMAL_CHAIN)
             await record_tokens(used_tokens, message.author.id)
         except Exception as e:
             history.pop()  # 失敗した発言は履歴に残さない
@@ -357,16 +373,16 @@ TALK_INPUT_LIMIT = 300
 @bot.tree.command(name="talk", description="AIに話しかけますよ〜（返事と音声が届きますよ〜）")
 @discord.app_commands.describe(text="話しかける文章")
 async def talk_command(interaction: discord.Interaction, text: str):
-    await run_talk(interaction, text, GROQ_MODEL)
+    await run_talk(interaction, text, NORMAL_CHAIN)
 
 
 @bot.tree.command(name="deep", description="詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）")
 @discord.app_commands.describe(text="聞きたいこと")
 async def deep_command(interaction: discord.Interaction, text: str):
-    await run_talk(interaction, text, GROQ_DEEP_MODEL)
+    await run_talk(interaction, text, DEEP_CHAIN)
 
 
-async def run_talk(interaction: discord.Interaction, text: str, model: str) -> None:
+async def run_talk(interaction: discord.Interaction, text: str, models: list[str]) -> None:
     if not text:
         await interaction.response.send_message(get_msg("talk_empty"), ephemeral=True)
         return
@@ -387,7 +403,7 @@ async def run_talk(interaction: discord.Interaction, text: str, model: str) -> N
         raw_reply, used_tokens = await generate_reply([
             {"role": "system", "content": build_system_prompt(extra=await knowledge.lookup(text), crazy=force_crazy)},
             {"role": "user", "content": wrap_user_message(text, interaction.user.name)},
-        ], model=model)
+        ], models=models)
         await record_tokens(used_tokens, interaction.user.id)
         reply_text = strip_emotions(sanitize_reply(raw_reply))[:DISCORD_MESSAGE_LIMIT - 10]
 
@@ -987,19 +1003,17 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
         # まず /deta の記録から、質問に関係する行を探す。見つかれば、記録だけで答える（ウェブは使わない）
         records_text = await deta_search.excerpts(query)
         if records_text:
-            completion = await asyncio.to_thread(
-                groq_client.chat.completions.create,
+            completion = await groq_complete(
+                SEARCH_CHAIN,
                 messages=web_search.build_record_messages(query, knowledge_text, records_text),
-                model=GROQ_SEARCH_MODEL,
                 reasoning_effort="low",
                 max_completion_tokens=MAX_REPLY_TOKENS,
             )
         else:
             # 記録に無いときだけ、ウェブで調べる
-            completion = await asyncio.to_thread(
-                groq_client.chat.completions.create,
+            completion = await groq_complete(
+                SEARCH_CHAIN,
                 messages=web_search.build_messages(query, knowledge_text, None),
-                model=GROQ_SEARCH_MODEL,
                 tools=web_search.GROQ_SEARCH_TOOLS,
                 tool_choice="required",
                 reasoning_effort="low",
