@@ -29,7 +29,7 @@ def build_messages(query: str, knowledge_text: str | None, history_text: str | N
     if knowledge_text:
         parts.append(f"<参考情報（Google ドライブ）>\n{knowledge_text}\n</参考情報（Google ドライブ）>")
     if history_text:
-        parts.append(f"<最近の会話（参考）>\n{history_text}\n</最近の会話（参考）>")
+        parts.append(f"<公開チャンネルの会話の記録（参考・/deta）>\n{history_text}\n</公開チャンネルの会話の記録（参考・/deta）>")
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": "\n\n".join(parts)},

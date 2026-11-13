@@ -93,3 +93,41 @@ async def save_text(name: str, data: bytes) -> str:
             if resp.status >= 400:
                 raise BotDriveError(f"{name} を保存できませんでした（{resp.status}）。")
             return (await resp.json())["id"]
+
+
+async def find_folder_id() -> str | None:
+    """「/deta」フォルダの ID を返す。無ければ None（作らない。検索のときに使う）。"""
+    if _folder_id:
+        return _folder_id
+    token = await asyncio.to_thread(bot_drive.access_token)
+    headers = {"Authorization": f"Bearer {token}"}
+    timeout = aiohttp.ClientTimeout(total=60)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        query = f"name = '{_escape(FOLDER_NAME)}' and mimeType = '{FOLDER_MIME}' and trashed = false"
+        found = await _list(session, headers, query)
+    return found[0]["id"] if found else None
+
+
+async def read_history_files() -> dict[str, bytes]:
+    """「/deta」フォルダの「-history.txt」を全部読む。フォルダが無ければ空の辞書。"""
+    folder_id = await find_folder_id()
+    if not folder_id:
+        return {}
+    token = await asyncio.to_thread(bot_drive.access_token)
+    headers = {"Authorization": f"Bearer {token}"}
+    timeout = aiohttp.ClientTimeout(total=300)
+    result: dict[str, bytes] = {}
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        query = f"'{folder_id}' in parents and trashed = false and name contains '-history.txt'"
+        params = {"q": query, "fields": "files(id,name)", "pageSize": "200", "spaces": "drive"}
+        async with session.get(FILES_API, params=params, headers=headers) as resp:
+            if resp.status >= 400:
+                raise BotDriveError(f"/deta フォルダの一覧を読めませんでした（{resp.status}）。")
+            files = (await resp.json()).get("files", [])
+        for item in files:
+            async with session.get(f"{FILES_API}/{item['id']}", params={"alt": "media"}, headers=headers) as resp:
+                if resp.status >= 400:
+                    log.warning("[Drive] %s を読めませんでした: %s", item["name"], resp.status)
+                    continue
+                result[item["name"]] = await resp.read()
+    return result
