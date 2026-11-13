@@ -440,6 +440,59 @@ async def persona_command(
     await interaction.response.send_message(msg, ephemeral=True)
 
 
+# ファイルを指定の形式に変換する（/convert）。変換結果は、チャンネルに送る。
+# 変換元は添付ファイルの拡張子で決める。変換先は選んでもらう。
+CONVERT_TARGETS = ["jpg", "png", "webp", "gif", "bmp", "pdf", "txt", "mp3", "wav", "ogg", "mp4"]
+
+
+@bot.tree.command(name="convert", description="添付したファイルを、選んだ形式に変換しますよ〜")
+@discord.app_commands.describe(
+    file="変換するファイル（25MBまで）",
+    format="変換先の形式",
+)
+@discord.app_commands.choices(format=[
+    discord.app_commands.Choice(name=f, value=f) for f in CONVERT_TARGETS
+])
+async def convert_command(
+    interaction: discord.Interaction,
+    file: discord.Attachment,
+    format: str,
+):
+    src = normalize(os.path.splitext(file.filename)[1])
+    if not src:
+        await interaction.response.send_message("このファイル形式は変換に対応していませんよ〜", ephemeral=True)
+        return
+    if src == format:
+        await interaction.response.send_message("同じ形式には変換できませんよ〜", ephemeral=True)
+        return
+    if file.size > MAX_FILE_BYTES:
+        await interaction.response.send_message("ファイルが大きすぎますよ〜（25MBまで）。", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True)
+    try:
+        data = await file.read()
+        outputs = await asyncio.to_thread(convert_file, data, src, format)
+    except UnsupportedConversion as e:
+        await interaction.followup.send(f"{e}", ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(f"変換に失敗しましたね〜: `{e}`", ephemeral=True)
+        return
+
+    if any(len(b) > MAX_FILE_BYTES for _, b in outputs):
+        await interaction.followup.send("変換後のファイルが大きすぎて送信できませんよ〜", ephemeral=True)
+        return
+
+    files = [discord.File(io.BytesIO(b), filename=n) for n, b in outputs[:MAX_UPLOAD_FILES]]
+    note = "（先頭ページのみ）" if src == "pdf" and format != "txt" and len(outputs) == MAX_PDF_PAGES else ""
+    await interaction.followup.send(
+        f"{src} → {format} に変換しましたよ〜{note}",
+        files=files,
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
+
+
 # 今日の使用量を表示する（/usage）。結果は本人にだけ見える。
 @bot.tree.command(name="usage", description="今日のAIの使用量を表示しますよ〜")
 async def usage_command(interaction: discord.Interaction):
@@ -469,6 +522,7 @@ async def help_command(interaction: discord.Interaction):
         "- `/cheer`：チャンネルのみんなに応援メッセージを送りますよ〜（30秒の間隔があります）",
         "- `/virtual`：ウェブで話す画面のリンクとアクセスコードを見せますよ〜",
         "- `/usage`：今日の使用量と、あなたの残りの回数を見せますよ〜",
+        "- `/convert`：添付したファイルを、選んだ形式（jpg・png・pdf・mp3 など）に変換しますよ〜",
         "- `/reset`：このチャンネルの会話の履歴を消しますよ〜",
         "- `/deep`：詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）",
         "- `/model`：AIが使っているモデルを見せますよ〜",
