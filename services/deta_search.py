@@ -7,7 +7,7 @@
 import re
 import time
 
-from services import deta_drive
+from services import deta_store
 from services.redact import mask_sensitive
 
 CACHE_SECONDS = 300
@@ -29,8 +29,8 @@ async def _load() -> dict[str, list[str]]:
     global _cache, _cache_at
     if time.time() - _cache_at < CACHE_SECONDS:
         return _cache
-    files = await deta_drive.read_history_files()
-    _cache = {name: data.decode("utf-8-sig").splitlines() for name, data in files.items()}
+    records = await deta_store.read_all()
+    _cache = {name: text.splitlines() for name, text in records.items()}
     _cache_at = time.time()
     return _cache
 
@@ -86,7 +86,11 @@ def _select(files: dict[str, list[str]], query: str) -> str | None:
 
 async def excerpts(query: str) -> str | None:
     """質問に関係する、/deta の会話の抜き出し。無ければ None。"""
-    files = await _load()
+    try:
+        files = await _load()
+    except Exception as e:  # 記録が読めなくても、/search は答えられるように
+        print(f"[調べる] /deta の記録を読めませんでした: {e!r}", flush=True)
+        return None
     if not files:
         return None
     return _select(files, query)

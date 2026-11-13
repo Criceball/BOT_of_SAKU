@@ -88,7 +88,7 @@
 | `GEMINI_CODE_MODEL` | 任意 | `/code` のモデル（既定は `gemini-3.8-flash`） |
 | `CODE_PER_USER_DAILY` | 任意 | `/code` の1人1日の回数（既定 20） |
 | `CODE_GLOBAL_DAILY` | 任意 | `/code` の全体の1日の回数（既定 200） |
-| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | 任意 | 使用量とページを保存する Upstash Redis |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | 任意 | 使用量・`/code` のページ・公開チャンネルの会話の記録（`/search` の参考）を保存する Upstash Redis。無いと、再起動で消えます |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | 任意 | Google ドライブの bot フォルダを読むサービスアカウントの鍵（JSON の中身をそのまま） |
 | `BOT_DRIVE_FOLDER_ID` | 任意 | bot 専用フォルダの ID（フォルダの URL の最後の部分） |
 | `ADMIN_ROLE_NAMES` | 任意 | 管理者用コマンドを使える役職の名前（既定は `幹部,班長,副班長`） |

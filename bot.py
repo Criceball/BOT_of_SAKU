@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from fishaudio import FishAudio
 
-from services import deta_drive, deta_sync
+from services import deta_store, deta_sync
 from services.redact import mask_sensitive
 from services.converter import (
     FORMAT_ALIASES,
@@ -193,8 +193,6 @@ def mark_autosave(channel_id: int) -> None:
 
 async def autosave_flush() -> None:
     """印の付いた公開チャンネルを、Drive に書き出す（失敗したものは次回に回す）。"""
-    if not bot_drive.configured():
-        return
     for channel_id in list(autosave_dirty):
         autosave_dirty.discard(channel_id)
         channel = bot.get_channel(channel_id)
@@ -202,7 +200,7 @@ async def autosave_flush() -> None:
             continue
         try:
             data = await deta_sync.build_history(channel, JST)
-            await deta_drive.save_text(deta_sync.file_name(channel), data)
+            await deta_store.save(deta_sync.file_name(channel), data.decode("utf-8-sig"))
             print(f"[自動保存] {channel.name} を保存しました", flush=True)
         except Exception as e:
             print(f"[自動保存] {channel_id} に失敗: {e!r}", flush=True)
@@ -223,7 +221,7 @@ async def autosave_loop() -> None:
 async def on_ready():
     global _autosave_started
     print(f"ログイン成功ですよ〜: {bot.user.name}")
-    if not _autosave_started and bot_drive.configured():
+    if not _autosave_started:
         _autosave_started = True
         # 起動のとき、公開チャンネルをすべて一度書き出す
         for guild in bot.guilds:
