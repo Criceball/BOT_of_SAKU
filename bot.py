@@ -984,17 +984,27 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
         return [BUDGET_MESSAGE], None
     try:
         knowledge_text = await knowledge.lookup(query)
-        # 会話の参考は、Drive の /deta フォルダの中（公開チャンネルの記録）だけ。質問に関係する行を抜き出して渡す
-        history_text = await deta_search.excerpts(query)
-        completion = await asyncio.to_thread(
-            groq_client.chat.completions.create,
-            messages=web_search.build_messages(query, knowledge_text, history_text),
-            model=GROQ_SEARCH_MODEL,
-            tools=web_search.GROQ_SEARCH_TOOLS,
-            tool_choice="required",
-            reasoning_effort="low",
-            max_completion_tokens=MAX_REPLY_TOKENS,
-        )
+        # まず /deta の記録から、質問に関係する行を探す。見つかれば、記録だけで答える（ウェブは使わない）
+        records_text = await deta_search.excerpts(query)
+        if records_text:
+            completion = await asyncio.to_thread(
+                groq_client.chat.completions.create,
+                messages=web_search.build_record_messages(query, knowledge_text, records_text),
+                model=GROQ_SEARCH_MODEL,
+                reasoning_effort="low",
+                max_completion_tokens=MAX_REPLY_TOKENS,
+            )
+        else:
+            # 記録に無いときだけ、ウェブで調べる
+            completion = await asyncio.to_thread(
+                groq_client.chat.completions.create,
+                messages=web_search.build_messages(query, knowledge_text, None),
+                model=GROQ_SEARCH_MODEL,
+                tools=web_search.GROQ_SEARCH_TOOLS,
+                tool_choice="required",
+                reasoning_effort="low",
+                max_completion_tokens=MAX_REPLY_TOKENS,
+            )
         text = web_search.clean_answer(completion.choices[0].message.content)
         used = completion.usage.total_tokens if completion.usage else 0
     except Exception as e:
@@ -1012,7 +1022,7 @@ async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File 
     return chunks, None
 
 
-@bot.tree.command(name="search", description="ウェブで調べますよ〜（Drive の資料と、公開チャンネルの会話の記録も参考にしますよ〜）")
+@bot.tree.command(name="search", description="調べますよ〜（まず会話の記録から探して、無ければウェブで調べますよ〜）")
 @discord.app_commands.describe(query="調べたいこと")
 async def search_command(interaction: discord.Interaction, query: str):
     await interaction.response.defer(thinking=True)
