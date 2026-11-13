@@ -52,6 +52,9 @@ def convert_file(data: bytes, src: str, dst: str) -> list[tuple[str, bytes]]:
         return _pdf_to_images(data, dst)
     if src == "pdf" and dst == "txt":
         return [("converted.txt", _pdf_to_text(data))]
+    if src == "mp4" and dst in IMAGE_FORMATS:
+        # 動画の最初の1フレームを画像にする
+        return [(f"converted.{dst}", _ffmpeg_first_frame(data, src, dst))]
     if src in AV_FORMATS | {"gif"} and dst in AV_FORMATS | {"gif"}:
         return [(f"converted.{dst}", _ffmpeg_convert(data, src, dst))]
     raise UnsupportedConversion(f"{src} → {dst} の変換には対応していません")
@@ -90,6 +93,22 @@ def _pdf_to_text(data: bytes) -> bytes:
     with pymupdf.open(stream=data, filetype="pdf") as doc:
         text = "\n".join(page.get_text() for page in doc)
     return text.encode("utf-8")
+
+
+def _ffmpeg_first_frame(data: bytes, src: str, dst: str) -> bytes:
+    # 形式名は上の検証で許可された値だけなので、ファイル名に危険な文字は入らない
+    with tempfile.TemporaryDirectory() as tmp:
+        src_path = os.path.join(tmp, f"input.{src}")
+        dst_path = os.path.join(tmp, f"output.{dst}")
+        with open(src_path, "wb") as f:
+            f.write(data)
+        subprocess.run(
+            ["ffmpeg", "-y", "-loglevel", "error", "-i", src_path, "-frames:v", "1", dst_path],
+            check=True,
+            timeout=FFMPEG_TIMEOUT,
+        )
+        with open(dst_path, "rb") as f:
+            return f.read()
 
 
 def _ffmpeg_convert(data: bytes, src: str, dst: str) -> bytes:
