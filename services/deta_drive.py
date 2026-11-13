@@ -8,8 +8,11 @@
 import asyncio
 import json
 import logging
+import os
 
 import aiohttp
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 from services import bot_drive
 from services.bot_drive import BotDriveError
@@ -23,6 +26,29 @@ UPLOAD_API = "https://www.googleapis.com/upload/drive/v3/files"
 BOUNDARY = "deta_boundary_9f3c"
 
 _folder_id: str | None = None
+DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+
+def configured() -> bool:
+    """/deta の保存に使う認証（あなたのアカウントの OAuth）が設定されているか。"""
+    return all(os.getenv(k, "").strip() for k in ("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REFRESH_TOKEN"))
+
+
+def _deta_access_token() -> str:
+    """/deta のフォルダを扱うためのアクセストークン。あなたのアカウントの OAuth を使う（サービスアカウントは容量が無いため）。"""
+    if not configured():
+        raise BotDriveError("/deta の保存用の認証（GOOGLE_OAUTH_*）が設定されていません。")
+    creds = Credentials(
+        None,
+        refresh_token=os.environ["GOOGLE_OAUTH_REFRESH_TOKEN"].strip(),
+        token_uri=TOKEN_URI,
+        client_id=os.environ["GOOGLE_OAUTH_CLIENT_ID"].strip(),
+        client_secret=os.environ["GOOGLE_OAUTH_CLIENT_SECRET"].strip(),
+        scopes=[DRIVE_FILE_SCOPE],
+    )
+    creds.refresh(Request())
+    return creds.token
 
 
 def _escape(value: str) -> str:
@@ -44,7 +70,7 @@ async def ensure_folder() -> str:
     global _folder_id
     if _folder_id:
         return _folder_id
-    token = await asyncio.to_thread(bot_drive.access_token)
+    token = await asyncio.to_thread(_deta_access_token)
     headers = {"Authorization": f"Bearer {token}"}
     timeout = aiohttp.ClientTimeout(total=60)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -65,7 +91,7 @@ async def ensure_folder() -> str:
 async def save_text(name: str, data: bytes) -> str:
     """フォルダに name のテキストを保存する（同じ名前があれば上書き）。ファイルの ID を返す。"""
     folder_id = await ensure_folder()
-    token = await asyncio.to_thread(bot_drive.access_token)
+    token = await asyncio.to_thread(_deta_access_token)
     headers = {"Authorization": f"Bearer {token}"}
     timeout = aiohttp.ClientTimeout(total=300)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -99,7 +125,7 @@ async def find_folder_id() -> str | None:
     """「/deta」フォルダの ID を返す。無ければ None（作らない。検索のときに使う）。"""
     if _folder_id:
         return _folder_id
-    token = await asyncio.to_thread(bot_drive.access_token)
+    token = await asyncio.to_thread(_deta_access_token)
     headers = {"Authorization": f"Bearer {token}"}
     timeout = aiohttp.ClientTimeout(total=60)
     async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -113,7 +139,7 @@ async def read_history_files() -> dict[str, bytes]:
     folder_id = await find_folder_id()
     if not folder_id:
         return {}
-    token = await asyncio.to_thread(bot_drive.access_token)
+    token = await asyncio.to_thread(_deta_access_token)
     headers = {"Authorization": f"Bearer {token}"}
     timeout = aiohttp.ClientTimeout(total=300)
     result: dict[str, bytes] = {}

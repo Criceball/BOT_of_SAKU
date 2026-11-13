@@ -193,7 +193,7 @@ def mark_autosave(channel_id: int) -> None:
 
 async def autosave_flush() -> None:
     """印の付いた公開チャンネルを、Drive に書き出す（失敗したものは次回に回す）。"""
-    if not bot_drive.configured():
+    if not (bot_drive.configured() and deta_drive.configured()):
         return
     for channel_id in list(autosave_dirty):
         autosave_dirty.discard(channel_id)
