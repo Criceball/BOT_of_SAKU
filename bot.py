@@ -473,7 +473,7 @@ async def help_command(interaction: discord.Interaction):
         "- `/deep`：詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）",
         "- `/model`：AIが使っているモデルを見せますよ〜",
         "- `/persona`：AIの性格を見る・変える・元に戻しますよ〜（管理者だけ）",
-        "- `/deta`：チャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）",
+        "- `/deta`：チャンネルの会話を、件数（既定1000）と前から・後ろからを選んで、テキストで取り出しますよ〜（管理者だけ）",
         "",
         "※ この一覧と結果は、あなただけに見えますよ〜",
     ]
@@ -657,11 +657,25 @@ async def say_command(
         allowed_mentions=mentions,
     )
 
-# 指定したチャンネルの会話履歴を500件取り出して、テキストファイルで本人にだけ渡す（/deta。管理者だけ）
-# 1行＝1発言：[日時] 名前: 内容。ボットの発言は含めない。
-@bot.tree.command(name="deta", description="指定したチャンネルの会話を500件、テキストで取り出しますよ〜（管理者だけ）")
-@discord.app_commands.describe(channel="取り出すチャンネル（省略すると、今のチャンネル）")
-async def deta_command(interaction: discord.Interaction, channel: discord.TextChannel | None = None):
+# 指定したチャンネルの会話を取り出して、テキストファイルで本人にだけ渡す（/deta。管理者だけ）
+# 1行＝1発言：[日時] 名前: 内容。ボットの発言は含めない（件数にも数えない）。
+# 件数の既定は1000件。古い順（前から）か、新しい順（後ろから・最新から遡る）で取る。出力は、どちらでも古い順。
+@bot.tree.command(name="deta", description="指定したチャンネルの会話を取り出しますよ〜（既定は前から1000件。管理者だけ）")
+@discord.app_commands.describe(
+    channel="取り出すチャンネル（省略すると、今のチャンネル）",
+    count="取り出す件数（ボットの発言を除く。既定は1000）",
+    order="どちらから取るか（既定は前から）",
+)
+@discord.app_commands.choices(order=[
+    discord.app_commands.Choice(name="前から（古い順）", value="oldest"),
+    discord.app_commands.Choice(name="後ろから（最新から遡る）", value="newest"),
+])
+async def deta_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+    count: discord.app_commands.Range[int, 1, 10000] = 1000,
+    order: str = "oldest",
+):
     if not is_admin(interaction):
         await interaction.response.send_message(ADMIN_ONLY_MESSAGE, ephemeral=True)
         return
@@ -671,10 +685,18 @@ async def deta_command(interaction: discord.Interaction, channel: discord.TextCh
         await interaction.response.send_message(get_msg("no_history_permission"), ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True, thinking=True)
-    lines = []
-    async for message in target.history(limit=500, oldest_first=True):
+    # ボットの発言を除いて、人の発言を count 件集める。新しい順の場合は、集めたあとで古い順に並べ直す
+    picked = []
+    async for message in target.history(limit=None, oldest_first=(order == "oldest")):
+        if len(picked) >= count:
+            break
         if message.author.bot:
             continue
+        picked.append(message)
+    if order != "oldest":
+        picked.reverse()
+    lines = []
+    for message in picked:
         stamp = message.created_at.astimezone(JST).strftime("%Y-%m-%d %H:%M")
         text = message.content.replace("\r", "").replace("\n", " / ")
         for attachment in message.attachments:
