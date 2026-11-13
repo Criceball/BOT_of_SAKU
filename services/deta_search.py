@@ -35,11 +35,17 @@ async def _load() -> dict[str, list[str]]:
     return _cache
 
 
+# 単語の区切りになる助詞や、質問の言い回し（これで区切ってから、2文字ずつにする）
+SEPARATOR = re.compile(
+    r"[\s、。，．,.!！?？「」『』（）()]+"
+    r"|について|とは|って|ですか|ありますか|教えて|何|誰|いつ|どこ|の|は|が|を|に|で|と|も|か|て|な|よ|ね"
+)
+
+
 def _keywords(query: str) -> set[str]:
-    """質問から、探す言葉（2文字の組み）を作る。日本語は空白で区切られないので、2文字ずつにする。"""
-    words = re.split(r"[\s、。，．,.!！?？「」『』（）()]+", query)
+    """質問から、探す言葉（2文字の組み）を作る。日本語は空白で区切られないので、助詞で区切ってから2文字ずつにする。"""
     grams: set[str] = set()
-    for w in words:
+    for w in SEPARATOR.split(query):
         if not w or w in STOP_TOKENS:
             continue
         if len(w) <= 2:
@@ -53,11 +59,14 @@ def _select(files: dict[str, list[str]], query: str) -> str | None:
     grams = _keywords(query)
     if not grams:
         return None
+    # 点数が低すぎる行（たまたま1、2文字が合うだけの行）は、関係ないとみなす。
+    # 関係ないとみなされたら None を返し、ウェブで調べる
+    threshold = max(2, len(grams) // 2)
     hits: list[tuple[int, str, int]] = []  # (点数, ファイル名, 行の番号)
     for name, lines in files.items():
         for i, line in enumerate(lines):
             score = sum(1 for g in grams if g in line)
-            if score:
+            if score >= threshold:
                 hits.append((score, name, i))
     if not hits:
         return None
