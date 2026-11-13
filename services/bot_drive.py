@@ -23,11 +23,7 @@ from google.oauth2 import service_account
 
 log = logging.getLogger(__name__)
 
-# drive.readonly: 共有されたフォルダの資料を読む。drive.file: ボットが作ったファイル（/deta）だけを読み書きする
-SCOPES = [
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.file",
-]
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]  # 読むだけ。書き込みはしない
 SUPPORTED_NAMES = {"persona.txt", "web_persona.txt", "club.txt", "knowledge.txt", "web_package.zip"}
 DRIVE_API = "https://www.googleapis.com/drive/v3/files"
 
