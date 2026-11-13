@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import discord
 
 from config.messages import get_list, get_msg
-from services import bot_drive, codegen, code_store, coding, knowledge, usage_store, web_search
+from services import bot_drive, codegen, code_store, coding, deta_search, knowledge, usage_store, web_search
 from services.gemini import GeminiError
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -1004,7 +1004,7 @@ async def handle_natural_command(message: discord.Message, text: str) -> bool:
         return True
     if wants_search(text):
         async with message.channel.typing():
-            chunks, file = await run_search(message.author.id, message.channel, text, wants_history(text))
+            chunks, file = await run_search(message.author.id, text)
         await send_chunks_reply(message, chunks, file)
         return True
     if not text:
@@ -1020,31 +1020,13 @@ async def handle_natural_command(message: discord.Message, text: str) -> bool:
 
 # 調べ物（/search と「調べて」などの言葉）。Groq のウェブ検索、Drive の資料、最近の会話を使う
 SEARCH_TRIGGERS = ("調べて", "検索して", "ググって", "調べてほしい", "調べてくれ")
-HISTORY_WORDS = ("会話", "履歴", "さっき", "前に話", "話した", "今までの")
 
 
 def wants_search(text: str) -> bool:
     return any(t in text for t in SEARCH_TRIGGERS)
 
 
-def wants_history(text: str) -> bool:
-    return any(w in text for w in HISTORY_WORDS)
-
-
-async def channel_history_text(channel, limit: int = 20) -> str | None:
-    """チャンネルの最近の人の発言を、古い順に並べて返す（ボットの発言は除く）。"""
-    lines = []
-    try:
-        async for m in channel.history(limit=limit):
-            if m.author.bot or not m.content:
-                continue
-            lines.append(f"{m.author.display_name}: {m.content[:200]}")
-    except discord.HTTPException:
-        return None
-    return "\n".join(reversed(lines)) or None
-
-
-async def run_search(user_id: int, channel, query: str, use_history: bool) -> tuple[list[str], discord.File | None]:
+async def run_search(user_id: int, query: str) -> tuple[list[str], discord.File | None]:
     """調べて、答えの文章の一覧と長いときの全文ファイルを返す。"""
     quota_key = take_quota(user_id)
     if quota_key is None:
@@ -1054,7 +1036,8 @@ async def run_search(user_id: int, channel, query: str, use_history: bool) -> tu
         return [BUDGET_MESSAGE], None
     try:
         knowledge_text = await knowledge.lookup(query)
-        history_text = await channel_history_text(channel) if use_history else None
+        # 会話の参考は、Drive の /deta フォルダの中（公開チャンネルの記録）だけ。質問に関係する行を抜き出して渡す
+        history_text = await deta_search.excerpts(query)
         completion = await asyncio.to_thread(
             groq_client.chat.completions.create,
             messages=web_search.build_messages(query, knowledge_text, history_text),
@@ -1081,11 +1064,11 @@ async def run_search(user_id: int, channel, query: str, use_history: bool) -> tu
     return chunks, None
 
 
-@bot.tree.command(name="search", description="ウェブで調べますよ〜（Drive の資料と、最近の会話も参考にしますよ〜）")
+@bot.tree.command(name="search", description="ウェブで調べますよ〜（Drive の資料と、公開チャンネルの会話の記録も参考にしますよ〜）")
 @discord.app_commands.describe(query="調べたいこと")
 async def search_command(interaction: discord.Interaction, query: str):
     await interaction.response.defer(thinking=True)
-    chunks, file = await run_search(interaction.user.id, interaction.channel, query, wants_history(query))
+    chunks, file = await run_search(interaction.user.id, query)
     for i, chunk in enumerate(chunks):
         kwargs = {"file": file} if (file and i == len(chunks) - 1) else {}
         await interaction.followup.send(chunk, allowed_mentions=discord.AllowedMentions.none(), **kwargs)
