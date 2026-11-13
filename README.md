@@ -91,6 +91,7 @@
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | 任意 | 使用量とページを保存する Upstash Redis |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | 任意 | Google ドライブの bot フォルダを読むサービスアカウントの鍵（JSON の中身をそのまま） |
 | `BOT_DRIVE_FOLDER_ID` | 任意 | bot 専用フォルダの ID（フォルダの URL の最後の部分） |
+| `DETA_FOLDER_ID` | 任意 | `/search` が読む会話の記録のフォルダ（Google ドライブ）の ID。フォルダはサービスアカウントに閲覧者として共有します |
 | `ADMIN_ROLE_NAMES` | 任意 | 管理者用コマンドを使える役職の名前（既定は `幹部,班長,副班長`） |
 | `WEB_ACCESS_KEY` | ウェブ画面に必要 | ウェブで話す画面の合言葉。無いと画面は止まり、ボットだけ動きます |
 | `WEB_DEV_ACCESS_KEY` | 任意 | 開発者用の合言葉（回数制限がかかりません） |

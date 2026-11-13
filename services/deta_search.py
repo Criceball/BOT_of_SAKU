@@ -86,7 +86,13 @@ def _select(files: dict[str, list[str]], query: str) -> str | None:
 
 async def excerpts(query: str) -> str | None:
     """質問に関係する、/deta の会話の抜き出し。無ければ None。"""
-    files = await _load()
+    if not deta_drive.configured():
+        return None
+    try:
+        files = await _load()
+    except Exception as e:  # /deta が読めなくても、/search は答えられるように
+        print(f"[調べる] /deta を読めませんでした: {e!r}", flush=True)
+        return None
     if not files:
         return None
     return _select(files, query)
