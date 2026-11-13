@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from groq import Groq
 from fishaudio import FishAudio
 
+from services import deta_drive, deta_sync
 from services.redact import mask_sensitive
 from services.converter import (
     FORMAT_ALIASES,
@@ -179,9 +180,57 @@ def cut_at_sentence(text: str, limit: int) -> str:
     return head[: cut + 1] if cut > 0 else head
 
 
+# 自動保存（公開チャンネルの会話を、Drive の /deta フォルダに書き出す）
+# 新しい発言があったチャンネルの ID を入れておき、まとめて書き出す
+autosave_dirty: set[int] = set()
+AUTOSAVE_INTERVAL_SECONDS = 300
+_autosave_started = False
+
+
+def mark_autosave(channel_id: int) -> None:
+    autosave_dirty.add(channel_id)
+
+
+async def autosave_flush() -> None:
+    """印の付いた公開チャンネルを、Drive に書き出す（失敗したものは次回に回す）。"""
+    if not bot_drive.configured():
+        return
+    for channel_id in list(autosave_dirty):
+        autosave_dirty.discard(channel_id)
+        channel = bot.get_channel(channel_id)
+        if channel is None or not deta_sync.is_public(channel):
+            continue
+        try:
+            data = await deta_sync.build_history(channel, JST)
+            await deta_drive.save_text(deta_sync.file_name(channel), data)
+            print(f"[自動保存] {channel.name} を保存しました", flush=True)
+        except Exception as e:
+            print(f"[自動保存] {channel_id} に失敗: {e!r}", flush=True)
+            autosave_dirty.add(channel_id)
+        await asyncio.sleep(2)  # 連続のアクセスで、Discord や Drive の制限に当たらないように
+
+
+async def autosave_loop() -> None:
+    while True:
+        await asyncio.sleep(AUTOSAVE_INTERVAL_SECONDS)
+        try:
+            await autosave_flush()
+        except Exception as e:
+            print(f"[自動保存] 止まりました: {e!r}", flush=True)
+
+
 @bot.event
 async def on_ready():
+    global _autosave_started
     print(f"ログイン成功ですよ〜: {bot.user.name}")
+    if not _autosave_started and bot_drive.configured():
+        _autosave_started = True
+        # 起動のとき、公開チャンネルをすべて一度書き出す
+        for guild in bot.guilds:
+            for channel in guild.text_channels:
+                if deta_sync.is_public(channel):
+                    mark_autosave(channel.id)
+        bot.loop.create_task(autosave_loop())
 
 
 @bot.event
@@ -189,6 +238,10 @@ async def on_message(message: discord.Message):
     # ボット自身や他のボットの発言には反応しない
     if message.author.bot:
         return
+
+    # 公開チャンネルの新しい発言は、次の自動保存で書き出す
+    if message.guild and deta_sync.is_public(message.channel):
+        mark_autosave(message.channel.id)
 
     # 「ウェブで話そう」と送られたら、リンクとアクセスコードを個人宛てに送る
     if WEB_TALK_TRIGGER in message.content:
