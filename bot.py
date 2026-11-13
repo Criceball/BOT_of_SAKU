@@ -542,6 +542,8 @@ async def help_command(interaction: discord.Interaction):
         "- `/virtual`：ウェブで話す画面のリンクとアクセスコードを見せますよ〜",
         "- `/usage`：今日の使用量と、あなたの残りの回数を見せますよ〜",
         "- `/convert`：添付したファイルを、選んだ形式（jpg・png・pdf・mp3 など）に変換しますよ〜",
+        "- `/search`：まず会話の記録から探して、無ければウェブで調べますよ〜",
+        "- `/code`：HTMLのページを作りますよ〜（直すときは fix_of に前のページのIDを入れてね）",
         "- `/reset`：このチャンネルの会話の履歴を消しますよ〜",
         "- `/deep`：詳しく答えてほしいときに使いますよ〜（賢いモデルで答えますよ〜）",
         "- `/model`：AIが使っているモデルを見せますよ〜",
@@ -554,13 +556,18 @@ async def help_command(interaction: discord.Interaction):
 
 
 # 使っているモデルを表示する（/model）。本人にだけ見える。
-@bot.tree.command(name="model", description="AIが使っているモデルを表示しますよ〜")
+@bot.tree.command(name="model", description="AIが使っているモデルと、今日の残りを表示しますよ〜")
 async def model_command(interaction: discord.Interaction):
-    msg = (
-        "使っているモデル\n"
-        f"- 文章：`{GROQ_MODEL}`（Groq）\n"
-        f"- 音声：`{FISH_MODEL}`（Fish Audio）"
-    )
+    def line(model: str) -> str:
+        used = model_budget.used_today(model)
+        limit = model_budget.model_limit(model)
+        state = "" if model_budget.available(model) else "（今日は上限です）"
+        return f"  - `{model}`：{used:,} / {limit:,}{state}"
+
+    msg = "使っているモデル（今日の使用量 / 切り替えの上限）\n"
+    msg += "- 普段の会話と検索：\n" + "\n".join(line(m) for m in NORMAL_CHAIN) + "\n"
+    msg += "- 詳しく答えるとき（/deep など）：\n" + "\n".join(line(m) for m in DEEP_CHAIN) + "\n"
+    msg += f"- 音声：`{FISH_MODEL}`（Fish Audio）"
     await interaction.response.send_message(msg, ephemeral=True)
 
 # 管理者用コマンドを使える役職の名前（カンマ区切りで ADMIN_ROLE_NAMES に変えられる）
@@ -610,10 +617,15 @@ async def stats_command(interaction: discord.Interaction):
     requests = stored["requests"]
     users = len({uid for (uid, day), n in daily_usage.items() if day == today and n > 0})
     channels = sum(1 for history in chat_history.values() if history)
+    models = sorted(set(NORMAL_CHAIN + DEEP_CHAIN + SEARCH_CHAIN))
+    model_lines = "\n".join(
+        f"  - `{m}`：{model_budget.used_today(m):,} / {model_budget.model_limit(m):,}" for m in models
+    )
     msg = (
         "今日の利用状況（全体）\n"
-        f"- トークン：{total_tokens:,}\n"
+        f"- トークン（全部）：{total_tokens:,}\n"
         f"- 回数：{requests}回（{users}人）\n"
+        f"- モデルごと（使用量 / 切り替えの上限）：\n{model_lines}\n"
         f"- 会話中のチャンネル：{channels}\n"
         f"- 狂気モード：{'ON' if force_crazy else 'OFF'}"
     )
