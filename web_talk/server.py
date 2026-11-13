@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 # 性格・安全対策・文字数の上限は、リポジトリの prompts.py を使う
 sys.path.insert(0, str(REPO))
-from services import bot_drive, code_store, knowledge, usage_store  # noqa: E402
+from services import bot_drive, code_store, knowledge, model_budget, usage_store  # noqa: E402
 from prompts import (  # noqa: E402
     MAX_CHAT_CHARS,
     build_system_prompt,
@@ -42,6 +42,9 @@ from prompts import (  # noqa: E402
 load_dotenv(REPO / ".env")
 
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+# 上のモデルが上限（9割）に達したときの予備。ボットと同じ順番で使う
+GROQ_FALLBACK_MODEL = os.getenv("GROQ_FALLBACK_MODEL", "qwen/qwen3.8-27b")
+WEB_CHAIN = [GROQ_MODEL, GROQ_FALLBACK_MODEL]
 FISH_MODEL = os.getenv("FISH_MODEL", "s2.1-pro-free")
 FISH_REFERENCE_ID = os.getenv("FISH_REFERENCE_ID", "")
 # Render などでは PORT が渡される。自分のPCで試すときは WEB_PORT（既定 8000）
@@ -57,7 +60,6 @@ WEB_DAILY_LIMIT = 30
 
 MAX_REPLY_TOKENS = 2048
 HISTORY_LIMIT = 6  # 直近の発言を何件まで覚えるか
-DAILY_TOKEN_BUDGET = 180_000  # Groq の無料枠（1日20万）より手前で止める
 TTS_CHAR_LIMIT = 300  # 音声にする文字数の上限
 JST = timezone(timedelta(hours=9))
 
@@ -70,21 +72,10 @@ FILLER_TEXT = "はい！"
 filler_audio: dict = {}
 
 history: list[dict] = []
-usage = {"day": "", "tokens": 0}
 
 
 def today() -> str:
     return datetime.now(JST).strftime("%Y-%m-%d")
-
-
-def budget_left() -> bool:
-    return usage["day"] != today() or usage["tokens"] < DAILY_TOKEN_BUDGET
-
-
-def add_usage(used: int) -> None:
-    if usage["day"] != today():
-        usage["day"], usage["tokens"] = today(), 0
-    usage["tokens"] += used
 
 
 def cut_at_sentence(text: str, limit: int) -> str:
@@ -164,7 +155,7 @@ async def chat(request: web.Request) -> web.Response:
         return json_error("入力が空です", 400)
     if len(text) > MAX_CHAT_CHARS:
         return json_error(f"{MAX_CHAT_CHARS}文字までです", 400)
-    if not budget_left():
+    if not model_budget.any_available(WEB_CHAIN):
         return json_error("もうあなたとは話したくない", 429)
     if not count_use(request):
         return json_error(f"今日の利用回数（{WEB_DAILY_LIMIT}回）に達しました。明日また使えます。", 429)
@@ -173,11 +164,12 @@ async def chat(request: web.Request) -> web.Response:
     history.append({"role": "user", "content": wrap_user_message(text, "相手")})
     del history[:-HISTORY_LIMIT]
     messages = [{"role": "system", "content": build_system_prompt(web_persona(), extra=await knowledge.lookup(text))}, *history]
+    model = model_budget.pick(WEB_CHAIN)
     try:
         completion = await asyncio.to_thread(
             groq_client.chat.completions.create,
             messages=messages,
-            model=GROQ_MODEL,
+            model=model,
             max_completion_tokens=MAX_REPLY_TOKENS,
         )
     except Exception as e:
@@ -187,8 +179,8 @@ async def chat(request: web.Request) -> web.Response:
         return json_error(f"AIとの通信に失敗しました: {e}", 502)
 
     if completion.usage:
-        add_usage(completion.usage.total_tokens)
-        await usage_store.add(today(), completion.usage.total_tokens)   # 再起動しても消えないように保存
+        # モデルごとの数に足す（ボットと共有。再起動しても消えないように保存される）
+        await model_budget.record(completion.usage.total_tokens, model)
     raw = sanitize_reply(completion.choices[0].message.content or "", web_persona())
     reply = strip_emotions(raw)
     history.append({"role": "assistant", "content": reply[:300]})
@@ -254,8 +246,7 @@ async def _make_filler() -> None:
 
 async def load_filler(app: web.Application) -> None:
     # 再起動の後も、今日の使用量を続きから数えられるように、保存された値を読み直す
-    usage["day"] = today()
-    usage["tokens"] = (await usage_store.totals(today()))["tokens"]
+    await model_budget.load_today(WEB_CHAIN)
     # 相づちの音声は、後ろで作る。終わるのを待つと、画面が開くまで時間がかかるため
     app["filler_task"] = asyncio.create_task(_make_filler())
 
