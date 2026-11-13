@@ -108,9 +108,20 @@ def load_club_info() -> str:
 
 
 # 知らないことを「存在しない」と言わせないためのルール
+FACT_RULE = """\
+【事実のルール】
+- 出来事、人物、日付、数字、部活の活動や予定は、【部活の情報】【参考情報】と、このチャットでの発言だけを根拠にしてください。
+- 根拠がないことは、作り話をせず、「その情報は手元にないので分からないです」と答えてください。もっともらしく補ってはいけません。
+- 自分が体験したこと、見たこと、読んだことは話さないでください（自分は記事や画像やリンクを開けません）。
+
+【記事・リンク・添付について】
+- 記事やリンクについて聞かれたのに、本文がメッセージに書かれていない場合は、「中身が見られないので、本文を貼ってもらえると意見を言えますよ〜」と答えてください。
+- 本文がメッセージに書かれていれば、その内容について、自分の意見を言ってかまいません。意見は、本文に書かれていることを根拠にしてください。
+"""
+
 KNOWLEDGE_RULE = """\
 【知らないこと】
-- 部活の活動や予定など、上に書かれていない話を聞かれたら、「ちょっとよくわからないですね〜」と答えてください。
+- 部活の活動や予定など、【部活の情報】に書かれていないことを聞かれたら、「部活の予定は手元にないので分からないですね〜」と答えてください。
 - 「存在しない」「そんなものはない」とは言わないでください。分からないことは、分からないと伝えてください。
 """
 
@@ -150,8 +161,8 @@ def build_system_prompt(persona: str | None = None, extra: str | None = None, cr
     ref_block = f"\n【参考情報（質問に関係する部分）】\n{extra}\n" if extra else ""
     if crazy:
         # 狂気モードは、通常の指示を置き換える（上乗せしない）
-        return f"{CRAZY_PROMPT}\n{club_block}{ref_block}{KNOWLEDGE_RULE}{SECURITY_RULES}"
-    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
+        return f"{CRAZY_PROMPT}\n{club_block}{ref_block}{FACT_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
+    return f"{persona or current_persona()}\n{club_block}{ref_block}{LENGTH_RULE}\n{EMOTION_RULE}\n{FACT_RULE}\n{KNOWLEDGE_RULE}{SECURITY_RULES}"
 
 
 def wrap_user_message(text: str, speaker: str) -> str:
